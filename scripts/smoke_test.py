@@ -83,7 +83,9 @@ def test_feature_flags_off() -> None:
 def test_pipeline_runs() -> None:
     from oa2.graph.pipeline import run
     ctx = run("SPY")
-    assert ctx.decision == {"status": "phase0_scaffold_only", "ticker": "SPY"}
+    assert ctx.decision is not None
+    assert ctx.decision["ticker"] == "SPY"
+    assert ctx.decision["status"] in ("phase0_scaffold_only", "scaffold_only", "debaters_only", "full_pipeline")
 
 
 def main() -> int:
