@@ -429,10 +429,11 @@ class TestFlowDebater:
         assert debater.name == "flow"
 
     def test_pcr_bullish_call_sweeps(self):
-        """PCR < 0.6 (call-heavy) + call sweeps → bullish."""
+        """PCR < 0.6 (call-heavy) + call sweeps → bullish (requires data_quality='real')."""
         context = {
             "ticker": "SPY",
             "flow_data": {
+                "data_quality": "real",
                 "put_call_ratio": 0.55,
                 "call_sweep_count": 3,
                 "put_sweep_count": 0,
@@ -449,10 +450,11 @@ class TestFlowDebater:
         assert opinion.signals_used["call_sweeps"] == 3
 
     def test_pcr_bearish_put_sweeps(self):
-        """PCR > 1.5 (put-heavy) + put sweeps → bearish."""
+        """PCR > 1.5 (put-heavy) + put sweeps → bearish (requires data_quality='real')."""
         context = {
             "ticker": "QQQ",
             "flow_data": {
+                "data_quality": "real",
                 "put_call_ratio": 1.65,
                 "call_sweep_count": 0,
                 "put_sweep_count": 5,
@@ -481,7 +483,7 @@ class TestFlowDebater:
         assert opinion.conviction <= 0.35
 
     def test_flow_from_chain_fallback(self):
-        """Can derive minimal flow from chain Greeks when no flow_data."""
+        """Phase A1: no real flow data + chain Greeks only → honest abstention, conviction=0."""
         context = {
             "ticker": "DIA",
             "flow_data": None,
@@ -495,15 +497,18 @@ class TestFlowDebater:
         debater = FlowDebater()
         opinion = debater.debate(context)
 
-        # Should derive call-heavy from vega/delta and return opinion
+        # Phase A1: chain Greeks are NOT real flow data — must abstain, not fabricate a vote
         assert opinion.debater_name == "flow"
-        assert 0.0 <= opinion.conviction <= 1.0
+        assert opinion.direction == Direction.NEUTRAL
+        assert opinion.conviction == 0.0
+        assert opinion.signals_used.get("abstained") is True
 
     def test_oi_change_bullish(self):
-        """Call OI surging + put OI collapsing → bullish."""
+        """Call OI surging + put OI collapsing → bullish (requires data_quality='real')."""
         context = {
             "ticker": "SPY",
             "flow_data": {
+                "data_quality": "real",
                 "put_call_ratio": 0.90,
                 "large_call_oi_change": 0.25,  # Calls surging
                 "large_put_oi_change": -0.30,  # Puts collapsing
@@ -517,10 +522,11 @@ class TestFlowDebater:
         assert opinion.direction == Direction.BULLISH
 
     def test_signals_used_complete(self):
-        """All flow signals logged."""
+        """All flow signals logged (requires data_quality='real')."""
         context = {
             "ticker": "SPY",
             "flow_data": {
+                "data_quality": "real",
                 "put_call_ratio": 0.80,
                 "call_sweep_count": 2,
                 "put_sweep_count": 0,

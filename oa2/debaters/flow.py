@@ -1,4 +1,22 @@
-"""Options flow debater — institutional/smart-money perspective (quant-only, v2)."""
+"""Options flow debater — institutional/smart-money perspective (quant-only, v2).
+
+Phase A1: Honest abstention policy.
+When no real flow data is available the debater returns conviction=0.0 and
+NEUTRAL direction so the consensus engine marginalises it out cleanly.
+It does NOT fabricate PCR from chain Greeks.
+
+Real data signals (populated by a live flow adapter):
+  flow_data["put_call_ratio"]        — tape PCR (not derived from delta)
+  flow_data["call_sweep_count"]      — aggressive call sweeps
+  flow_data["put_sweep_count"]       — aggressive put sweeps
+  flow_data["dark_pool_bullish"]     — large dark pool prints on offer side
+  flow_data["dark_pool_bearish"]     — large dark pool prints on bid side
+  flow_data["large_call_oi_change"]  — % change in call OI (daily)
+  flow_data["large_put_oi_change"]   — % change in put OI (daily)
+  flow_data["unusual_call_vol"]      — bool: call vol > 2× avg
+  flow_data["unusual_put_vol"]       — bool: put vol > 2× avg
+  flow_data["data_quality"]          — "real" | "derived" | "absent"
+"""
 
 from __future__ import annotations
 
@@ -21,34 +39,78 @@ def _interpret_put_call_ratio(pcr: float) -> tuple[str, Direction]:
         return f"PCR {pcr:.2f} — balanced flow", Direction.NEUTRAL
 
 
+def _has_real_flow_data(flow_data: dict) -> bool:
+    """Return True only when flow_data contains genuine, non-derived signals.
+
+    A debater should never vote on fabricated inputs. Real data must come
+    from an actual options tape feed, not be derived from chain Greeks.
+    """
+    if not flow_data:
+        return False
+
+    quality = flow_data.get("data_quality", "absent")
+    if quality == "absent":
+        return False
+
+    # Even if quality says "real", require at least one actual signal present
+    real_signals = [
+        flow_data.get("put_call_ratio") is not None,
+        flow_data.get("call_sweep_count", 0) > 0,
+        flow_data.get("put_sweep_count", 0) > 0,
+        flow_data.get("dark_pool_bullish") is True,
+        flow_data.get("dark_pool_bearish") is True,
+        abs(flow_data.get("large_call_oi_change", 0.0)) > 0.05,
+        abs(flow_data.get("large_put_oi_change", 0.0)) > 0.05,
+        flow_data.get("unusual_call_vol") is True,
+        flow_data.get("unusual_put_vol") is True,
+    ]
+    return any(real_signals)
+
+
 class FlowDebater(DebaterBase):
     """Argues from institutional / smart-money options flow.
 
-    Signals:
-      - Put/call ratio (PCR)
+    Signals (real tape data only):
+      - Put/call ratio (PCR) from tape
       - Call vs put sweeps (aggressive institutional buys)
       - OI changes (positioning trends)
+      - Dark pool prints
       - Unusual volume
 
     Conviction: linear model on bull_ratio, capped [0.10, 0.90].
+
+    ABSTENTION POLICY (Phase A1):
+    When no real flow data is available this debater returns conviction=0.0
+    and direction=NEUTRAL. It does NOT derive PCR from chain Greeks or
+    any other proxy. The consensus engine handles zero-conviction opinions
+    by marginalising them out, so a silent debater is always preferable to
+    a debater voting on fabricated data.
     """
 
     def __init__(self):
         super().__init__("flow")
 
     def debate(self, context: dict[str, Any]) -> DebaterOpinion:
-        """Assess institutional flow alignment with proposed trade."""
-        ticker = context.get("ticker", "UNKNOWN")
+        """Assess institutional flow alignment with proposed trade.
 
-        # Extract flow data (from context or derive from chain)
+        Returns abstention opinion if no real flow data available.
+        """
         flow_data = context.get("flow_data") or {}
-        chain = context.get("chain_snapshot")
 
-        # If no explicit flow_data, try to derive from chain Greeks
-        if not flow_data and chain:
-            flow_data = self._flow_from_chain(chain)
+        # --- Phase A1: honest abstention ---
+        if not _has_real_flow_data(flow_data):
+            return DebaterOpinion(
+                debater_name=self.name,
+                direction=Direction.NEUTRAL,
+                conviction=0.0,
+                reasoning="No real flow data available — abstaining. Provide real tape data via flow_data['data_quality']='real'.",
+                signals_used={
+                    "data_quality": flow_data.get("data_quality", "absent"),
+                    "abstained": True,
+                },
+            )
 
-        # Parse flow signals
+        # --- Real flow data available: compute opinion ---
         bull_score = 0
         bear_score = 0
         signals = []
@@ -145,7 +207,6 @@ class FlowDebater(DebaterBase):
             (flow_direction == Direction.NEUTRAL and trade_is_neutral)
         )
 
-        # Assess conviction
         if flow_direction == Direction.NEUTRAL or not signals:
             conviction = flow_conviction
             reasoning = "Flow is neutral or no strong signal detected."
@@ -157,6 +218,8 @@ class FlowDebater(DebaterBase):
             reasoning = f"Flow is {flow_direction.value} but trade is misaligned. Contradiction reduces conviction."
 
         signals_dict = {
+            "data_quality": flow_data.get("data_quality", "real"),
+            "abstained": False,
             "pcr": flow_data.get("put_call_ratio"),
             "call_sweeps": call_sweeps,
             "put_sweeps": put_sweeps,
@@ -179,31 +242,3 @@ class FlowDebater(DebaterBase):
             reasoning=reasoning,
             signals_used=signals_dict,
         )
-
-    @staticmethod
-    def _flow_from_chain(chain: dict | Any) -> dict:
-        """Derive minimal flow proxy from chain Greeks when no dedicated feed."""
-        flow = {}
-        if not chain:
-            return flow
-
-        vega = 0.0
-        delta = 0.5
-        if isinstance(chain, dict):
-            vega = chain.get("vega", 0.0)
-            delta = chain.get("delta", 0.5)
-        else:
-            vega = getattr(chain, "vega", 0.0)
-            delta = getattr(chain, "delta", 0.5)
-
-        if vega > 0.05:
-            flow["unusual_call_vol"] = True
-        elif vega < -0.05:
-            flow["unusual_put_vol"] = True
-
-        if delta > 0.55:
-            flow["put_call_ratio"] = 0.7
-        elif delta < 0.45:
-            flow["put_call_ratio"] = 1.3
-
-        return flow

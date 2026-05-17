@@ -1,4 +1,11 @@
-"""Consensus engine — GLS aggregation of debater opinions with correlation-aware weighting."""
+"""Consensus engine — GLS aggregation of debater opinions with correlation-aware weighting.
+
+Phase A3: The correlation matrix is now sourced from EWMACovariance (rolling EWMA
+over the debater opinion log) when OA2_FLAG_EWMA_CORR is enabled. When the EWMA
+tracker has insufficient observations (< 20 per debater) it transparently falls
+back to the hardcoded _fixed_correlation() values. This gives a smooth transition
+from cold-start to data-driven correlations.
+"""
 
 from __future__ import annotations
 
@@ -9,11 +16,16 @@ from oa2.debaters.base import DebaterOpinion
 
 
 class ConsensusEngine:
-    """Aggregates 5 debater opinions into a single consensus direction.
+    """Aggregates debater opinions into a single consensus direction.
 
     Uses Generalized Least Squares (GLS) weighting to account for correlation
     between debaters. Debaters that agree more strongly get higher weights;
     debaters with high noise (low conviction) get discounted.
+
+    Correlation source (Phase A3):
+    - If OA2_FLAG_EWMA_CORR=1 (default True) and the EWMA tracker is warm,
+      use live EWMA correlations computed from the debater opinion log.
+    - Otherwise fall back to hardcoded _fixed_correlation() priors.
 
     Outputs:
     - direction: BULLISH, BEARISH, or NEUTRAL
@@ -23,15 +35,41 @@ class ConsensusEngine:
     - weights: final GLS weight per debater
     """
 
-    def __init__(self, regime: str | None = None, prior_weights: dict[str, float] | None = None):
+    def __init__(
+        self,
+        regime: str | None = None,
+        prior_weights: dict[str, float] | None = None,
+        covariance_tracker=None,
+    ):
         """Initialize consensus engine.
 
         Args:
-            regime: optional regime string for regime-aware weighting (future)
-            prior_weights: optional prior weights to blend with GLS weights (from Phase 4 bandit)
+            regime: optional regime string for regime-aware weighting
+            prior_weights: optional prior weights from Phase 4 bandit
+            covariance_tracker: optional EWMACovariance instance (Phase A3).
+                When None, loads from disk if OA2_FLAG_EWMA_CORR enabled,
+                otherwise uses hardcoded _fixed_correlation().
         """
         self.regime = regime
         self.prior_weights = prior_weights
+        self._covariance_tracker = covariance_tracker
+
+    def _get_covariance_tracker(self):
+        """Lazy-load the EWMA covariance tracker once per engine instance."""
+        if self._covariance_tracker is not None:
+            return self._covariance_tracker
+
+        from oa2.core import feature_flags
+        if not feature_flags.EWMA_CORR_ENABLED:
+            return None
+
+        try:
+            from oa2.consensus.covariance import EWMACovariance, default_covariance_path
+            self._covariance_tracker = EWMACovariance.load(default_covariance_path())
+        except Exception:
+            self._covariance_tracker = None
+
+        return self._covariance_tracker
 
     def aggregate(self, opinions: list[DebaterOpinion]) -> Consensus:
         """Aggregate debater opinions into consensus.
@@ -127,37 +165,43 @@ class ConsensusEngine:
 
         return vectors
 
-    @staticmethod
-    def _compute_correlation_matrix(opinion_vectors: dict[str, float]) -> dict[str, dict[str, float]]:
+    def _compute_correlation_matrix(self, opinion_vectors: dict[str, float]) -> dict[str, dict[str, float]]:
         """Compute correlation matrix between debater opinions.
 
-        Simple Pearson correlation between opinion vectors.
-        Assumes stable correlation over a rolling window (future: update dynamically).
+        Phase A3: Uses EWMA live correlations when tracker is warm and
+        OA2_FLAG_EWMA_CORR is enabled. Falls back to hardcoded priors
+        transparently when data is insufficient (< 20 observations per debater).
 
         Returns NxN correlation matrix where N = len(opinion_vectors)
         """
         names = list(opinion_vectors.keys())
-        corr = {}
+        tracker = self._get_covariance_tracker()
 
+        # Update tracker with current opinions (so each run contributes to future estimates)
+        if tracker is not None:
+            tracker.update_batch(opinion_vectors)
+
+        # Build correlation matrix: use EWMA if warm, else hardcoded fallback
+        corr = {}
         for name1 in names:
             corr[name1] = {}
             for name2 in names:
                 if name1 == name2:
                     corr[name1][name2] = 1.0
+                elif tracker is not None and tracker.is_warm([name1, name2]):
+                    corr[name1][name2] = tracker.correlation(name1, name2)
                 else:
-                    # For now: fixed correlations based on debater pairs
-                    # (In Phase 4, these would be learned from historical data)
                     corr[name1][name2] = ConsensusEngine._fixed_correlation(name1, name2)
 
         return corr
 
     @staticmethod
     def _fixed_correlation(name1: str, name2: str) -> float:
-        """Fixed correlation between debater pairs (learned from Phase 1 logs).
+        """Fallback hardcoded correlation between debater pairs.
 
-        Directional & Income are moderately correlated (both bullish on momentum + cheap IV)
-        Directional & Volatility: weakly correlated (different signals)
-        Flow & Sentiment: weakly correlated (flow is institutional, sentiment is crowd)
+        Used when EWMA tracker has insufficient observations (< 20 per debater).
+        These are prior assumptions, not empirically validated.
+        Phase A3 replaces these with live EWMA estimates as data accumulates.
         """
         pairs = {
             frozenset(["directional", "income"]): 0.40,

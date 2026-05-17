@@ -2,9 +2,6 @@
 
 Each new component ships in shadow mode (compute but don't act) before
 cutover. Flags are read at module import; restart to change.
-
-Phase 0 ships all flags OFF except imports — pipeline raises
-NotImplementedError until Phase 1 ports debaters.
 """
 
 from __future__ import annotations
@@ -16,33 +13,50 @@ def _flag(name: str, default: bool = False) -> bool:
     return os.getenv(name, "1" if default else "0").lower() in ("1", "true", "yes", "on")
 
 
-# Phase 1
+# Phase 1 — Debaters
 DEBATERS_ENABLED = _flag("OA2_FLAG_DEBATERS", default=False)
 
-# Phase 2
+# Phase 2 — Regime classifier
 REGIME_CLASSIFIER_ENABLED = _flag("OA2_FLAG_REGIME", default=False)
 
-# Phase 3
+# Phase 3 — Consensus engine
 CONSENSUS_ENGINE_ENABLED = _flag("OA2_FLAG_CONSENSUS", default=False)
 CONSENSUS_SHADOW_LOG = _flag("OA2_FLAG_CONSENSUS_SHADOW", default=True)
 
-# Phase 4
+# Phase 4 — Thompson bandit
 BANDIT_ENABLED = _flag("OA2_FLAG_BANDIT", default=False)
 BANDIT_USE_POSTERIOR_MEAN = _flag("OA2_FLAG_BANDIT_MEAN", default=True)
 
-# Phase 5
+# Phase 5 — Dealer agent
 DEALER_AGENT_ENABLED = _flag("OA2_FLAG_DEALER", default=False)
 DEALER_SHADOW_LOG = _flag("OA2_FLAG_DEALER_SHADOW", default=True)
 
-# Phase 8
+# Phase 8 — Event risk agent
 EVENT_RISK_AGENT_ENABLED = _flag("OA2_FLAG_EVENT_RISK", default=False)
 
 # A/B comparison harness vs v1
 AB_COMPARE_WITH_V1 = _flag("OA2_FLAG_AB_V1", default=False)
 
+# Phase A — Signal integrity (production readiness)
+# A1: Flow debater honest abstention — always enforced, no flag needed (code-level change)
+# A2: Bandit warm-start — run scripts/bandit_warmstart.py manually; posteriors load automatically
+# A3: EWMA correlation matrix — replaces hardcoded _fixed_correlation() in consensus engine
+EWMA_CORR_ENABLED = _flag("OA2_FLAG_EWMA_CORR", default=True)
+
+# Phase B — Sizing engine (not yet built)
+SIZING_ENGINE_ENABLED = _flag("OA2_FLAG_SIZING", default=False)
+
+# Phase C — Exit engine (not yet built)
+EXIT_ENGINE_ENABLED = _flag("OA2_FLAG_EXIT", default=False)
+
+# Phase D — Regime enhancements (not yet built)
+SESSION_OVERLAY_ENABLED = _flag("OA2_FLAG_SESSION", default=False)
+CROSS_ASSET_REGIME_ENABLED = _flag("OA2_FLAG_CROSS_ASSET", default=False)
+
 
 def all_flags() -> dict[str, bool]:
     return {
+        # Phases 1-5
         "DEBATERS_ENABLED": DEBATERS_ENABLED,
         "REGIME_CLASSIFIER_ENABLED": REGIME_CLASSIFIER_ENABLED,
         "CONSENSUS_ENGINE_ENABLED": CONSENSUS_ENGINE_ENABLED,
@@ -53,4 +67,13 @@ def all_flags() -> dict[str, bool]:
         "DEALER_SHADOW_LOG": DEALER_SHADOW_LOG,
         "EVENT_RISK_AGENT_ENABLED": EVENT_RISK_AGENT_ENABLED,
         "AB_COMPARE_WITH_V1": AB_COMPARE_WITH_V1,
+        # Phase A
+        "EWMA_CORR_ENABLED": EWMA_CORR_ENABLED,
+        # Phase B
+        "SIZING_ENGINE_ENABLED": SIZING_ENGINE_ENABLED,
+        # Phase C
+        "EXIT_ENGINE_ENABLED": EXIT_ENGINE_ENABLED,
+        # Phase D
+        "SESSION_OVERLAY_ENABLED": SESSION_OVERLAY_ENABLED,
+        "CROSS_ASSET_REGIME_ENABLED": CROSS_ASSET_REGIME_ENABLED,
     }
