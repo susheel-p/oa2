@@ -1,7 +1,9 @@
 """oa2 pipeline — plain Python orchestration of the 9-layer architecture.
 
-Phase 0 status: skeleton only. `run()` raises NotImplementedError until
-Phase 1 ports the debaters. Each phase fills in one stage.
+Phases completed:
+- Phase 1: 5 debaters + JSONL logging
+- Phase 2: Regime classifier (8-bucket vol × trend)
+- Phase 3: Consensus engine (GLS aggregation)
 """
 
 from __future__ import annotations
@@ -9,8 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from oa2.consensus.engine import ConsensusEngine
 from oa2.core import feature_flags
 from oa2.debaters.runner import DebaterEnsemble
+from oa2.regime.classifier import RegimeClassifier
 
 
 @dataclass
@@ -55,9 +59,18 @@ def run(ticker: str, as_of: str | None = None, context_dict: dict[str, Any] | No
     else:
         ctx.market_data = {"ticker": ticker, "stub": True}
 
-    # L1 — regime
+    # L1 — regime classifier (Phase 2)
     if feature_flags.REGIME_CLASSIFIER_ENABLED:
-        raise NotImplementedError("Phase 2: regime classifier not yet built")
+        classifier = RegimeClassifier()
+        ctx.regime = classifier.classify(ctx.market_data)
+        ctx.attribution["regime"] = {
+            "regime_id": ctx.regime.regime_id,
+            "vol_state": ctx.regime.vol_state.value,
+            "trend_state": ctx.regime.trend_state.value,
+            "confidence": ctx.regime.confidence,
+        }
+    else:
+        ctx.regime = None
 
     # L2 — context agents
     if feature_flags.DEALER_AGENT_ENABLED:
@@ -69,17 +82,42 @@ def run(ticker: str, as_of: str | None = None, context_dict: dict[str, Any] | No
         ctx.debater_opinions = ensemble.run(ctx.market_data, log_to_disk=True)
         ctx.attribution["debater_ensemble"] = ensemble.opinions_summary(ctx.debater_opinions)
     else:
-        # Phase 0: placeholder
         ctx.debater_opinions = []
 
-    # L5 — consensus
-    if feature_flags.CONSENSUS_ENGINE_ENABLED:
-        raise NotImplementedError("Phase 3: consensus engine not yet built")
+    # L5 — consensus engine (Phase 3)
+    if feature_flags.CONSENSUS_ENGINE_ENABLED and ctx.debater_opinions:
+        consensus_engine = ConsensusEngine(regime=ctx.regime.regime_id if ctx.regime else None)
+        ctx.consensus = consensus_engine.aggregate(ctx.debater_opinions)
+        ctx.attribution["consensus"] = {
+            "direction": ctx.consensus.direction.value,
+            "score": ctx.consensus.score,
+            "n_eff": ctx.consensus.n_eff,
+            "p_bull": ctx.consensus.p_bull,
+            "weights": ctx.consensus.weights,
+        }
+    else:
+        ctx.consensus = None
 
-    # Phase 0/1: no decision yet
+    # Determine decision status and output
+    if ctx.consensus:
+        status = "full_pipeline"
+        direction = ctx.consensus.direction.value
+        consensus_score = ctx.consensus.score
+    elif ctx.debater_opinions:
+        status = "debaters_only"
+        direction = None
+        consensus_score = None
+    else:
+        status = "scaffold_only"
+        direction = None
+        consensus_score = None
+
     ctx.decision = {
-        "status": "debaters_only" if ctx.debater_opinions else "scaffold_only",
+        "status": status,
         "ticker": ticker,
+        "regime_id": ctx.regime.regime_id if ctx.regime else None,
         "opinion_count": len(ctx.debater_opinions),
+        "direction": direction,
+        "consensus_score": consensus_score,
     }
     return ctx
