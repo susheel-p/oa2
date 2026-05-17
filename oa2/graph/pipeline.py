@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from oa2.core import feature_flags
+from oa2.debaters.runner import DebaterEnsemble
 
 
 @dataclass
@@ -26,24 +27,33 @@ class PipelineContext:
     attribution: dict[str, Any] = field(default_factory=dict)
 
 
-def run(ticker: str, as_of: str | None = None) -> PipelineContext:
+def run(ticker: str, as_of: str | None = None, context_dict: dict[str, Any] | None = None) -> PipelineContext:
     """End-to-end pipeline for one ticker.
 
-    Layers (each gated by a feature flag; Phase 0 has none enabled):
+    Layers (each gated by a feature flag):
       L0  fetch market data
-      L1  regime classification
-      L2  context agents (dealer, macro, event, exec)
+      L1  regime classification (Phase 2)
+      L2  context agents (Phase 5)
       L3  timeframe routing
-      L4  debater ensemble
-      L5  consensus engine
+      L4  debater ensemble (Phase 1)
+      L5  consensus engine (Phase 3)
       L6  sizing
       L7  portfolio orchestration
       L8  execution / journal write
+
+    Args:
+        ticker: stock/ETF symbol
+        as_of: optional date for backtesting
+        context_dict: optional dict with pre-populated market data, regime, etc.
+                      used for backtesting; real-time uses default stubs
     """
     ctx = PipelineContext(ticker=ticker, as_of=as_of)
 
-    # L0 — market data (always on; just no-op stub for Phase 0)
-    ctx.market_data = {"ticker": ticker, "stub": True}
+    # L0 — market data (stub if not provided)
+    if context_dict:
+        ctx.market_data = context_dict.copy()
+    else:
+        ctx.market_data = {"ticker": ticker, "stub": True}
 
     # L1 — regime
     if feature_flags.REGIME_CLASSIFIER_ENABLED:
@@ -53,14 +63,23 @@ def run(ticker: str, as_of: str | None = None) -> PipelineContext:
     if feature_flags.DEALER_AGENT_ENABLED:
         raise NotImplementedError("Phase 5: dealer agent not yet built")
 
-    # L4 — debaters
+    # L4 — debaters (Phase 1)
     if feature_flags.DEBATERS_ENABLED:
-        raise NotImplementedError("Phase 1: debaters not yet ported")
+        ensemble = DebaterEnsemble()
+        ctx.debater_opinions = ensemble.run(ctx.market_data, log_to_disk=True)
+        ctx.attribution["debater_ensemble"] = ensemble.opinions_summary(ctx.debater_opinions)
+    else:
+        # Phase 0: placeholder
+        ctx.debater_opinions = []
 
     # L5 — consensus
     if feature_flags.CONSENSUS_ENGINE_ENABLED:
         raise NotImplementedError("Phase 3: consensus engine not yet built")
 
-    # Phase 0: nothing decided
-    ctx.decision = {"status": "phase0_scaffold_only", "ticker": ticker}
+    # Phase 0/1: no decision yet
+    ctx.decision = {
+        "status": "debaters_only" if ctx.debater_opinions else "scaffold_only",
+        "ticker": ticker,
+        "opinion_count": len(ctx.debater_opinions),
+    }
     return ctx
