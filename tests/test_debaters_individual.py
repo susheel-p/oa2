@@ -48,7 +48,7 @@ class TestDirectionalDebater:
         assert opinion.debater_name == "directional"
         assert opinion.direction == Direction.BULLISH
         assert 0.0 <= opinion.conviction <= 1.0
-        assert opinion.signals_used["bullish_signals"] > opinion.signals_used["bearish_signals"]
+        assert opinion.signals_used["bull_groups"] > opinion.signals_used["bear_groups"]
         assert opinion.signals_used["trade_aligned"] is True  # Structure matches tape
 
     def test_bearish_signal_stack(self):
@@ -69,7 +69,7 @@ class TestDirectionalDebater:
         opinion = debater.debate(context)
 
         assert opinion.direction == Direction.BEARISH
-        assert opinion.signals_used["bearish_signals"] > opinion.signals_used["bullish_signals"]
+        assert opinion.signals_used["bear_groups"] > opinion.signals_used["bull_groups"]
 
     def test_misaligned_trade_conviction_penalty(self):
         """Trade misaligned with tape direction → conviction reduced 25%."""
@@ -138,8 +138,8 @@ class TestDirectionalDebater:
         assert "ema_20" in opinion.signals_used
         assert "ema_50" in opinion.signals_used
         assert "rsi" in opinion.signals_used
-        assert "bullish_signals" in opinion.signals_used
-        assert "bearish_signals" in opinion.signals_used
+        assert "bull_groups" in opinion.signals_used
+        assert "bear_groups" in opinion.signals_used
         assert "tape_direction" in opinion.signals_used
         assert "trade_aligned" in opinion.signals_used
 
