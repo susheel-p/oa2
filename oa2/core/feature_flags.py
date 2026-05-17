@@ -49,9 +49,23 @@ SIZING_ENGINE_ENABLED = _flag("OA2_FLAG_SIZING", default=False)
 # Phase C — Exit engine (not yet built)
 EXIT_ENGINE_ENABLED = _flag("OA2_FLAG_EXIT", default=False)
 
-# Phase D — Regime enhancements (not yet built)
+# Phase D — Regime enhancements
 SESSION_OVERLAY_ENABLED = _flag("OA2_FLAG_SESSION", default=False)
 CROSS_ASSET_REGIME_ENABLED = _flag("OA2_FLAG_CROSS_ASSET", default=False)
+
+# Phase E — Real flow data
+# E1: vendor selection (manual decision — see ROADMAP.md Phase E)
+# E2: flow adapter layer — always available; quality depends on vendor configured
+FLOW_ADAPTER_SOURCE = os.getenv("OA2_FLOW_SOURCE", "yfinance")   # "yfinance" | "unusual_whales" | "tradier"
+FLOW_ADAPTER_ENABLED = _flag("OA2_FLAG_FLOW_ADAPTER", default=False)
+# E3: expiration-aware flow
+EXPIRY_FLOW_ENABLED = _flag("OA2_FLAG_EXPIRY_FLOW", default=False)
+
+# Phase F — Backtesting harness
+# F1: historical replay (run via: python scripts/backtest.py)
+# F2: bandit validation (included in backtest output)
+# F3: A/B vs v1 baseline (AB_COMPARE_WITH_V1 flag above)
+BACKTEST_ENABLED = _flag("OA2_FLAG_BACKTEST", default=False)
 
 
 def all_flags() -> dict[str, bool]:
@@ -76,4 +90,9 @@ def all_flags() -> dict[str, bool]:
         # Phase D
         "SESSION_OVERLAY_ENABLED": SESSION_OVERLAY_ENABLED,
         "CROSS_ASSET_REGIME_ENABLED": CROSS_ASSET_REGIME_ENABLED,
+        # Phase E
+        "FLOW_ADAPTER_ENABLED": FLOW_ADAPTER_ENABLED,
+        "EXPIRY_FLOW_ENABLED": EXPIRY_FLOW_ENABLED,
+        # Phase F
+        "BACKTEST_ENABLED": BACKTEST_ENABLED,
     }

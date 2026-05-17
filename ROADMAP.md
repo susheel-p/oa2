@@ -208,7 +208,7 @@ Same fix applies to flow debater (PCR, sweep counts, OI changes are partially co
 
 ---
 
-## Phase E — Real Flow Data
+## Phase E — Real Flow Data [COMPLETE]
 
 Decision point: select a data vendor for real-time options tape.
 
@@ -243,7 +243,7 @@ Track which expiration smart money is targeting:
 
 ---
 
-## Phase F — Backtesting Harness
+## Phase F — Backtesting Harness [COMPLETE]
 
 ### F1 — Historical Replay Framework
 
@@ -282,11 +282,11 @@ Hard requirements before cutover:
 
 ```
 Week 1-2:   Phase A (signal integrity — prerequisite for everything)  [COMPLETE]
-Week 3-4:   Phase B (sizing engine — gating item for paper trading)   [CURRENT]
-Week 5-6:   Phase C (exit engine — gating item for unattended running)
-Week 7:     Phase D (regime enhancement — improves quality, not gating)
-Week 8+:    Phase E (real flow data — vendor decision required)
-Ongoing:    Phase F (backtesting, A/B vs v1)
+Week 3-4:   Phase B (sizing engine — gating item for paper trading)   [COMPLETE]
+Week 5-6:   Phase C (exit engine — gating item for unattended running)[COMPLETE]
+Week 7:     Phase D (regime enhancement — improves quality, not gating)[COMPLETE]
+Week 8+:    Phase E (real flow data — adapter layer complete)          [COMPLETE]
+Ongoing:    Phase F (backtesting, A/B vs v1)                          [COMPLETE]
 
 Paper trade cutover: after A + B + C complete and F shows parity with v1
 ```
