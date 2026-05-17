@@ -7,73 +7,40 @@ live or paper trading. The following blockers exist:
 
 1. **No sizing engine** — wrong size kills edge even with correct direction
 2. **No exit engine** — options decay; winning trades become losses without automated exits
-3. **Flow debater emits fabricated signals** — PCR derived from chain delta, not real tape
-4. **Bandit cold-start** — 48 Beta(1,1) priors need 30-50 trades/arm to be useful; at
-   2-3 paper trades/day that is 6-12 months before adaptive weighting works
-5. **GLS correlations are assumptions** — hardcoded values never validated empirically
+3. **Flow debater emits fabricated signals** — PCR derived from chain delta, not real tape [FIXED A1]
+4. **Bandit cold-start** — 48 Beta(1,1) priors need 30-50 trades/arm to be useful [FIXED A2]
+5. **GLS correlations are assumptions** — hardcoded values never validated empirically [FIXED A3]
 
 **Paper trading gate:** Phase A + Phase B + Phase C complete, Phase F shows v2 Sharpe >= v1.
 
 ---
 
-## Phase A — Signal Integrity (current sprint)
+## Phase A — Signal Integrity [COMPLETE]
 
 Goal: make sure every signal the system emits is honest and statistically grounded.
 
-### A1 — Flow Debater: Honest Abstention
+### A1 — Flow Debater: Honest Abstention [DONE]
 
-**Problem:** FlowDebater derives PCR from chain delta (if delta > 0.55 → pcr = 0.7).
-This is not institutional flow. Dark pool flags are boolean stubs never populated.
-The debater currently votes with fabricated data, adding noise to consensus.
+**Fix:** `oa2/debaters/flow.py` — added `_has_real_flow_data()` guard requiring
+`flow_data["data_quality"] == "real"`. Returns `conviction=0.0, direction=NEUTRAL`
+when no real tape data available. No more PCR derived from chain delta.
 
-**Fix:**
-- When `flow_data` is empty and chain data is absent or stub, return:
-  `conviction=0.0, direction=NEUTRAL, reasoning="No real flow data available — abstaining"`
-- The consensus engine already handles abstention correctly (marginalizes out zero-conviction opinions)
-- Do NOT fabricate PCR from delta or vega. Prefer honest silence.
-- Add `data_quality: str` field to signals_used: "real" | "derived" | "absent"
+### A2 — Bandit Warm-Start from Historical Replay [DONE]
 
-**Files:** `oa2/debaters/flow.py`
+**Fix:** `scripts/bandit_warmstart.py` — full 6-month yfinance replay, scores
+next-day direction hits per (debater, regime), updates Beta posteriors.
+Usage: `python scripts/bandit_warmstart.py [--months 6] [--dry-run] [--verbose]`
 
-### A2 — Bandit Warm-Start from Historical Replay
+### A3 — EWMA Correlation Matrix [DONE]
 
-**Problem:** Beta(1,1) flat priors require 30-50 trades per arm before posteriors
-meaningfully differentiate debaters. At 2-3 paper trades/day across 8 regimes,
-adaptive weighting is dormant for the first year of paper trading.
-
-**Fix:**
-- Script: `scripts/bandit_warmstart.py`
-- Uses yfinance to fetch 6 months of daily OHLCV for all 22 tickers
-- Runs each debater against daily snapshots; classifies direction vs next-day close
-- Tags as hit (debater correct) or miss, updates Beta posteriors per regime
-- Saves warm posteriors to `~/.oa2/bandit/posteriors.json`
-- Bandit loads these on startup instead of flat Beta(1,1)
-
-**Also consider:** Hierarchical prior — shrink rare-regime arms toward overall debater mean.
-For regimes with < 10 historical observations, use partial pooling.
-
-**Files:** `scripts/bandit_warmstart.py`, `oa2/performance/bandit.py`
-
-### A3 — EWMA Correlation Matrix (replace hardcoded)
-
-**Problem:** `ConsensusEngine._fixed_correlation()` returns hardcoded pairs
-(directional/income = 0.40, etc.) that were never empirically validated. These
-determine which debaters get discounted as redundant — wrong correlations cause
-the GLS to amplify duplicate signals and discount independent ones.
-
-**Fix:**
-- Add `oa2/consensus/covariance.py`: rolling EWMA covariance tracker
-- Reads debater opinion logs (JSONL at `~/.oa2/debater_logs/opinions.jsonl`)
-- Computes Pearson correlation between debater signed_score() time series
-- Updates with decay factor λ=0.94 (standard RiskMetrics EWMA)
-- Falls back to flat 0.20 when fewer than 20 observations available
-- ConsensusEngine loads this at instantiation instead of calling _fixed_correlation()
-
-**Files:** `oa2/consensus/covariance.py`, `oa2/consensus/engine.py`
+**Fix:** `oa2/consensus/covariance.py` — rolling EWMA (λ=0.94, min 20 obs).
+`oa2/consensus/engine.py` — `_compute_correlation_matrix()` now instance method,
+uses live EWMA when tracker is warm, falls back to `_fixed_correlation()`.
+Feature flag: `OA2_FLAG_EWMA_CORR` (default on).
 
 ---
 
-## Phase B — Sizing Engine (oa2/sizing/)
+## Phase B — Sizing Engine (oa2/sizing/) [CURRENT SPRINT]
 
 Gate: required before any paper or live trading begins. No trade executes without sizing.
 
@@ -303,7 +270,7 @@ OA2_FLAG_AB_V1 flag exists but is unconnected. Wire it:
 ### F4 — Paper Cutover Gate
 
 Hard requirements before cutover:
-1. Phase A complete: honest debaters, live correlation, warm bandit
+1. Phase A complete: honest debaters, live correlation, warm bandit [DONE]
 2. Phase B complete: sizing engine passing all scenario checks
 3. Phase C complete: exit engine running on all open positions
 4. Phase F3: v2 Sharpe >= v1 Sharpe on 90-day replay
@@ -314,8 +281,8 @@ Hard requirements before cutover:
 ## Build Order and Timeline
 
 ```
-Week 1-2:   Phase A (signal integrity — prerequisite for everything)
-Week 3-4:   Phase B (sizing engine — gating item for paper trading)
+Week 1-2:   Phase A (signal integrity — prerequisite for everything)  [COMPLETE]
+Week 3-4:   Phase B (sizing engine — gating item for paper trading)   [CURRENT]
 Week 5-6:   Phase C (exit engine — gating item for unattended running)
 Week 7:     Phase D (regime enhancement — improves quality, not gating)
 Week 8+:    Phase E (real flow data — vendor decision required)

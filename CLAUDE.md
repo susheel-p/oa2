@@ -6,13 +6,15 @@ Greenfield v2 of `OptionsAgents` (sibling dir `../OptionsAgents/`). v1 is the
 production paper-trading system; v2 is being built fresh to fix structural
 weaknesses without dual-code-path refactoring.
 
-## Current status (Phases 1-5 complete)
+## Current status (Phase A complete, Phase B in progress)
 
-Phases 1-5 shipped: 5 debaters + dealer agent + regime classifier + GLS consensus engine
-+ Thompson bandit. Pipeline runs end-to-end with all flags enabled. 92 tests passing.
+Phases 0-5 shipped: 5 debaters + dealer agent + regime classifier + GLS consensus engine
++ Thompson bandit. Pipeline runs end-to-end with all flags enabled. 141 tests passing.
 
-NOT yet production-ready. Blockers: no sizing engine, no exit engine, flow debater
-uses fabricated signals, bandit cold-start unresolved, GLS correlations are assumptions.
+Phase A complete: flow debater honest abstention, bandit warm-start script,
+EWMA correlation matrix wired into consensus engine.
+
+NOT yet production-ready. Remaining blocker: no sizing engine, no exit engine.
 
 ## Original phase roadmap (completed)
 
@@ -31,25 +33,29 @@ These phases must complete before paper-trade cutover. Order is risk-priority.
 
 | Phase | Goal | Status | Gate |
 |---|---|---|---|
-| A | Honest debaters + live correlation + bandit warm-start | 🔨 In progress | Required for signal integrity |
-| B | Sizing engine (Kelly + book limits + CVaR) | Blocked on A | Required before any live trading |
+| A | Honest debaters + live correlation + bandit warm-start | ✅ Complete | Required for signal integrity |
+| B | Sizing engine (Kelly + book limits + CVaR) | 🔨 In progress | Required before any live trading |
 | C | Exit engine (position monitor + rules + roll logic) | Blocked on B | Required for unattended running |
 | D | Regime enhancement (session overlay + crisis leads + cross-asset) | After A | Improves signal quality |
 | E | Real flow data (sweep tape, real PCR) | Data vendor decision | Unlocks flow debater |
 | F | Backtesting harness + A/B vs v1 | Ongoing | Gate for paper cutover |
 
-### Phase A: Honest Debaters + Signal Integrity (current)
+### Phase A: Signal Integrity [COMPLETE]
 
-A1 — Flow debater: abstain (conviction=0.0) when no real sweep data. No more fake PCR.
-A2 — Bandit warm-start: backfill Beta posteriors from 6-month yfinance historical replay.
-A3 — EWMA correlation matrix: replace hardcoded _fixed_correlation() with rolling window from debater logs.
+A1 — Flow debater: abstain (conviction=0.0) when no real sweep data. Requires
+`flow_data["data_quality"] == "real"`. Files: `oa2/debaters/flow.py`.
 
-### Phase B: Sizing Engine (oa2/sizing/)
+A2 — Bandit warm-start: 6-month yfinance replay, scores next-day hits per
+(debater, regime), saves Beta posteriors. File: `scripts/bandit_warmstart.py`.
 
-B1 — Fractional Kelly: f* = (edge / odds) × 0.5 per trade.
-B2 — Book-level Greeks limits: hard caps on net delta, vega, theta.
-B3 — CVaR scenario check: 5 stress tests before trade approval.
-B4 — DTE-aware sizing: reduce size for short positions < 7 DTE.
+A3 — EWMA correlation matrix: `oa2/consensus/covariance.py` (λ=0.94, min 20 obs),
+wired into `oa2/consensus/engine.py` via `OA2_FLAG_EWMA_CORR` (default on).
+
+### Phase B: Sizing Engine [CURRENT SPRINT]
+
+B1 — Fractional Kelly (with DTE-aware scaling): `oa2/sizing/kelly.py`
+B2 — Book-level Greeks hard caps: `oa2/sizing/limits.py`
+B3 — CVaR 5-scenario stress check: `oa2/sizing/cvar.py`
 
 ### Phase C: Exit Engine (oa2/execution/exit.py)
 
@@ -120,6 +126,9 @@ F4 — Paper cutover gate: v2 Sharpe >= v1 Sharpe on 90-day backtest window.
 | Architecture + gap analysis? | `ARCHITECTURE.md` |
 | Full production roadmap? | `ROADMAP.md` |
 | Phase summaries? | `PHASE1_SUMMARY.md`, `PHASE2_3_SUMMARY.md`, `PHASE4_5_SUMMARY.md` |
-| Sizing engine? | `oa2/sizing/` (Phase B — not yet built) |
+| Kelly sizing engine? | `oa2/sizing/kelly.py` (Phase B1/B4) |
+| Greek hard caps? | `oa2/sizing/limits.py` (Phase B2) |
+| CVaR stress check? | `oa2/sizing/cvar.py` (Phase B3) |
 | Exit engine? | `oa2/execution/exit.py` (Phase C — not yet built) |
-| Bandit warm-start? | `scripts/bandit_warmstart.py` (Phase A2) |
+| Bandit warm-start? | `scripts/bandit_warmstart.py` (Phase A2 — complete) |
+| EWMA covariance? | `oa2/consensus/covariance.py` (Phase A3 — complete) |
