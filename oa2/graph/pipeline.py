@@ -4,6 +4,8 @@ Phases completed:
 - Phase 1: 5 debaters + JSONL logging
 - Phase 2: Regime classifier (8-bucket vol × trend)
 - Phase 3: Consensus engine (GLS aggregation)
+- Phase 4: Thompson sampling bandit (adaptive debater weighting)
+- Phase 5: Dealer agent (institutional positioning via GEX)
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ from oa2.consensus.engine import ConsensusEngine
 from oa2.core import feature_flags
 from oa2.debaters.runner import DebaterEnsemble
 from oa2.regime.classifier import RegimeClassifier
+from oa2.performance.bandit import BanditEngine
+from oa2.dealer.agent import DealerAgent
 
 
 @dataclass
@@ -72,21 +76,50 @@ def run(ticker: str, as_of: str | None = None, context_dict: dict[str, Any] | No
     else:
         ctx.regime = None
 
-    # L2 — context agents
-    if feature_flags.DEALER_AGENT_ENABLED:
-        raise NotImplementedError("Phase 5: dealer agent not yet built")
+    # L2 — dealer agent (Phase 5)
+    if feature_flags.DEALER_AGENT_ENABLED or feature_flags.DEALER_SHADOW_LOG:
+        dealer = DealerAgent()
+        dealer_opinion = dealer.debate(ctx.market_data)
+        if feature_flags.DEALER_AGENT_ENABLED:
+            ctx.context_agents["dealer_opinion"] = dealer_opinion
+            ctx.attribution["dealer"] = {
+                "direction": dealer_opinion.direction.value,
+                "conviction": dealer_opinion.conviction,
+                "signals": dealer_opinion.signals_used,
+            }
+        else:  # shadow mode only
+            ctx.attribution["dealer_shadow"] = {
+                "direction": dealer_opinion.direction.value,
+                "conviction": dealer_opinion.conviction,
+                "signals": dealer_opinion.signals_used,
+            }
 
-    # L4 — debaters (Phase 1)
+    # L4 — debaters (Phase 1 + Phase 5 dealer agent)
     if feature_flags.DEBATERS_ENABLED:
         ensemble = DebaterEnsemble()
         ctx.debater_opinions = ensemble.run(ctx.market_data, log_to_disk=True)
+        # Inject dealer opinion if Phase 5 enabled
+        if feature_flags.DEALER_AGENT_ENABLED and "dealer_opinion" in ctx.context_agents:
+            ctx.debater_opinions.append(ctx.context_agents["dealer_opinion"])
         ctx.attribution["debater_ensemble"] = ensemble.opinions_summary(ctx.debater_opinions)
     else:
         ctx.debater_opinions = []
 
-    # L5 — consensus engine (Phase 3)
+    # L5 — consensus engine (Phase 3 + Phase 4 bandit weights)
     if feature_flags.CONSENSUS_ENGINE_ENABLED and ctx.debater_opinions:
-        consensus_engine = ConsensusEngine(regime=ctx.regime.regime_id if ctx.regime else None)
+        regime_id = ctx.regime.regime_id if ctx.regime else None
+
+        # Phase 4: load bandit prior weights
+        bandit_weights = None
+        if feature_flags.BANDIT_ENABLED and regime_id is not None:
+            bandit = BanditEngine.load()
+            debater_names = [op.debater_name for op in ctx.debater_opinions]
+            bandit_weights = bandit.get_regime_weights(
+                debater_names, regime_id, use_mean=feature_flags.BANDIT_USE_POSTERIOR_MEAN
+            )
+            ctx.attribution["bandit_weights"] = bandit_weights
+
+        consensus_engine = ConsensusEngine(regime=regime_id, prior_weights=bandit_weights)
         ctx.consensus = consensus_engine.aggregate(ctx.debater_opinions)
         ctx.attribution["consensus"] = {
             "direction": ctx.consensus.direction.value,

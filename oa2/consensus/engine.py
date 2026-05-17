@@ -23,13 +23,15 @@ class ConsensusEngine:
     - weights: final GLS weight per debater
     """
 
-    def __init__(self, regime: str | None = None):
+    def __init__(self, regime: str | None = None, prior_weights: dict[str, float] | None = None):
         """Initialize consensus engine.
 
         Args:
             regime: optional regime string for regime-aware weighting (future)
+            prior_weights: optional prior weights to blend with GLS weights (from Phase 4 bandit)
         """
         self.regime = regime
+        self.prior_weights = prior_weights
 
     def aggregate(self, opinions: list[DebaterOpinion]) -> Consensus:
         """Aggregate debater opinions into consensus.
@@ -61,6 +63,17 @@ class ConsensusEngine:
             weights = {k: v / total_weight for k, v in weights.items()}
         else:
             weights = {op.debater_name: 0.2 for op in opinions}  # equal weight fallback
+
+        # Phase 4: blend with bandit prior weights if available
+        if self.prior_weights:
+            blended = {}
+            for name in weights:
+                prior = self.prior_weights.get(name, 1.0)  # default prior = 1.0 (neutral)
+                blended[name] = weights[name] * prior
+            # Renormalize
+            blend_total = sum(blended.values())
+            if blend_total > 0:
+                weights = {k: v / blend_total for k, v in blended.items()}
 
         # Compute weighted consensus score
         consensus_score = self._compute_consensus_score(opinion_vectors, weights)
