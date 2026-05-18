@@ -43,10 +43,10 @@ AB_COMPARE_WITH_V1 = _flag("OA2_FLAG_AB_V1", default=False)
 # A3: EWMA correlation matrix — replaces hardcoded _fixed_correlation() in consensus engine
 EWMA_CORR_ENABLED = _flag("OA2_FLAG_EWMA_CORR", default=True)
 
-# Phase B — Sizing engine (not yet built)
+# Phase B — Sizing engine (oa2/sizing/: kelly.py, limits.py, cvar.py)
 SIZING_ENGINE_ENABLED = _flag("OA2_FLAG_SIZING", default=False)
 
-# Phase C — Exit engine (not yet built)
+# Phase C — Exit engine (oa2/execution/: exit.py, monitor.py, roll.py)
 EXIT_ENGINE_ENABLED = _flag("OA2_FLAG_EXIT", default=False)
 
 # Phase D — Regime enhancements

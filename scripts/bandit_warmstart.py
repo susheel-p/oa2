@@ -173,7 +173,7 @@ def main() -> int:
         "sentiment": SentimentDebater(),
     }
 
-    tickers = args.tickers or list(WATCHLIST.keys())
+    tickers = args.tickers or list(WATCHLIST)
     end_date = datetime.today()
     start_date = end_date - timedelta(days=args.months * 31)
 

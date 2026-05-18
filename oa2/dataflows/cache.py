@@ -1,6 +1,6 @@
-﻿"""File-based cache for market context â€” keyed by (ticker, date).
+"""File-based cache for market context — keyed by (ticker, date).
 
-Saves one JSON file per (ticker, date) pair under ~/.optionsagents/cache/.
+Saves one JSON file per (ticker, date) pair under ~/.oa2/cache/.
 TTL: same-day data is reused; stale entries are refreshed automatically.
 """
 
@@ -14,7 +14,7 @@ from typing import Optional
 
 
 def _cache_dir() -> Path:
-    base = Path(os.getenv("OPTIONSAGENTS_HOME", Path.home() / ".optionsagents"))
+    base = Path(os.getenv("OA2_HOME", Path.home() / ".oa2"))
     d = base / "cache"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -82,7 +82,7 @@ def fetch_with_cache(ticker: str, date: str) -> dict:
     import os
     import warnings
 
-    # â”€â”€ Data fetch: try moomoo (quotes + bars), fallback to yfinance for options â”€â”€â”€â”€
+    # ── Data fetch: try moomoo (quotes + bars), fallback to yfinance for options ──
     ctx = None
     try:
         from oa2.dataflows.moomoo_data import fetch_market_snapshot
@@ -142,7 +142,7 @@ def fetch_with_cache(ticker: str, date: str) -> dict:
         warnings.warn(f"moomoo data fetch failed ({e}); using yfinance fallback")
         ctx = None
 
-    # â”€â”€ Fallback to yfinance if moomoo unavailable â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Fallback to yfinance if moomoo unavailable ─────────────────────────────
     if ctx is None:
         try:
             from oa2.dataflows.yfinance_options import fetch_market_context
@@ -157,7 +157,7 @@ def fetch_with_cache(ticker: str, date: str) -> dict:
                 "data_source": "error",
             }
 
-    # â”€â”€ News + sentiment overlay (independent of data source) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── News + sentiment overlay (independent of data source) ─────────────────
     try:
         from oa2.dataflows.news import fetch_news, composite_sentiment
         news_items = fetch_news(ticker, max_items=20, min_importance=0.0)

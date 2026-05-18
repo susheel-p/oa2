@@ -1,4 +1,4 @@
-﻿"""Unified moomoo data fetcher â€” replaces yfinance, Alpaca, Tradier.
+"""Unified moomoo data fetcher — replaces yfinance, Alpaca, Tradier.
 
 Single source of truth for:
   - Options chains + IV/Greeks
@@ -56,7 +56,7 @@ def _creds() -> tuple[str, str, str]:
     return username, password, account_id
 
 
-# â”€â”€ Quote Context (market data) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Quote Context (market data) ────────────────────────────────────────────
 
 _quote_ctx = None
 _subscribed_codes = set()
@@ -91,7 +91,7 @@ def _ensure_subscribed(code: str, sub_types: list):
         warnings.warn(f"Subscription error for {code}: {e}")
 
 
-# â”€â”€ Price Bars (OHLCV) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Price Bars (OHLCV) ─────────────────────────────────────────────────────
 
 def fetch_bars(
     ticker: str,
@@ -155,7 +155,7 @@ def fetch_bars(
         return pd.DataFrame()
 
 
-# â”€â”€ Real-time Quotes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Real-time Quotes ───────────────────────────────────────────────────────
 
 def fetch_quote(ticker: str) -> Dict[str, float]:
     """Fetch current quote for a ticker.
@@ -193,7 +193,7 @@ def fetch_quote(ticker: str) -> Dict[str, float]:
         return {}
 
 
-# â”€â”€ Technical Indicators â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Technical Indicators ───────────────────────────────────────────────────
 
 def compute_technicals(df: pd.DataFrame) -> pd.DataFrame:
     """Add technical indicators to price bars DataFrame.
@@ -256,7 +256,7 @@ def _calculate_vwap(high, low, close, volume):
     return vwap
 
 
-# â”€â”€ Options Chains â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Options Chains ─────────────────────────────────────────────────────────
 
 def fetch_options_chain(
     ticker: str,
@@ -448,7 +448,7 @@ def fetch_options_chain(
         return {"calls": [], "puts": [], "atm_strike": 0}
 
 
-# â”€â”€ IV Rank / Percentile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── IV Rank / Percentile ───────────────────────────────────────────────────
 
 def calculate_iv_rank(ticker: str, days_back: int = 252) -> float:
     """Calculate IV rank (percentile of current IV vs 1-year history).
@@ -489,7 +489,7 @@ def calculate_iv_rank(ticker: str, days_back: int = 252) -> float:
         return 50.0
 
 
-# â”€â”€ Unified Data Package â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Unified Data Package ───────────────────────────────────────────────────
 
 def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
     """Fetch everything: quote, bars, technicals, options chain, IV rank.
@@ -533,16 +533,3 @@ def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
     except Exception as e:
         warnings.warn(f"Error fetching market snapshot for {ticker}: {e}")
         return {"ticker": ticker, "error": str(e)}
-
-
-# â”€â”€ Test / CLI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-if __name__ == "__main__":
-    # Test: fetch SPY snapshot
-    snapshot = fetch_market_snapshot("SPY")
-    print(f"SPY Snapshot ({snapshot['timestamp']})")
-    print(f"  Price: ${snapshot['quote'].get('last_price', 'N/A')}")
-    print(f"  EMA20: ${snapshot['latest_candle'].get('ema_20', 'N/A')}")
-    print(f"  IV Rank: {snapshot['iv_rank']:.0f}%")
-    print(f"  Calls: {len(snapshot['options_chain'].get('calls', []))}")
-    print(f"  Puts: {len(snapshot['options_chain'].get('puts', []))}")

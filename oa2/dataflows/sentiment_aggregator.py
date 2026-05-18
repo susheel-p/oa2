@@ -1,4 +1,4 @@
-﻿"""Sentiment aggregator: combines Reddit, StockTwits, moomoo News, yfinance.
+"""Sentiment aggregator: combines Reddit, StockTwits, moomoo News, yfinance.
 
 Fetches sentiment from all 4 sources in parallel, computes weighted composite,
 returns SentimentSnapshot. Caches results for 15 minutes.
@@ -131,7 +131,7 @@ async def fetch_sentiment(
         snapshot = SentimentSnapshot(
             ticker=ticker,
             yfinance_score=yf_score,
-            alpaca_score=moomoo_score,  # Reuse schema field for moomoo score
+            alpaca_score=moomoo_score,  # Schema field reused for moomoo news score
             reddit_bull_pct=reddit_bull_pct,
             stocktwits_bull_pct=stocktwits_bull_pct,
             composite_score=round(composite_score, 3),
@@ -162,7 +162,7 @@ async def fetch_sentiment(
         return SentimentSnapshot(
             ticker=ticker,
             yfinance_score=0.0,
-            alpaca_score=0.0,  # Schema field (moomoo news data)
+            alpaca_score=0.0,  # Schema field reused for moomoo news score
             reddit_bull_pct=0.5,
             stocktwits_bull_pct=0.5,
             composite_score=0.0,

@@ -1,4 +1,4 @@
-﻿"""yfinance market data fetcher â€” price, vol, IV, skew, term structure."""
+"""yfinance market data fetcher — price, vol, IV, skew, term structure."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def fetch_market_context(
     """
     t = yf.Ticker(ticker)
 
-    # â”€â”€ 1. Price history (1 year + a bit for EMA warmup) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 1. Price history (1 year + a bit for EMA warmup) ──────────────────────
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         hist = t.history(period="400d", auto_adjust=True)
@@ -58,7 +58,7 @@ def fetch_market_context(
     # VWAP proxy: (H+L+C)/3 (true VWAP requires intraday ticks)
     vwap = (high + low + current_price) / 3.0
 
-    # â”€â”€ 2. EMAs (daily 8/21/50/200) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 2. EMAs (daily 8/21/50/200) ───────────────────────────────────────────
     closes = hist["Close"]
     ema_8   = float(closes.ewm(span=8,   adjust=False).mean().iloc[-1])
     ema_20  = float(closes.ewm(span=20,  adjust=False).mean().iloc[-1])
@@ -67,14 +67,14 @@ def fetch_market_context(
     ema_200 = float(closes.ewm(span=200, adjust=False).mean().iloc[-1]) if len(closes) >= 200 else ema_50
     avg_volume = float(hist["Volume"].rolling(20).mean().iloc[-1])
 
-    # Daily ATR(14) â€” used to normalize EMA distances
+    # Daily ATR(14) — used to normalize EMA distances
     high_low   = hist["High"] - hist["Low"]
     high_close = (hist["High"] - closes.shift()).abs()
     low_close  = (hist["Low"]  - closes.shift()).abs()
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     atr_14 = float(tr.rolling(14).mean().iloc[-1]) if len(tr) >= 14 else float(high_low.mean())
 
-    # â”€â”€ 2b. Intraday EMAs (15m: 8/21/50) for S/R map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 2b. Intraday EMAs (15m: 8/21/50) for S/R map ─────────────────────────
     ema15_8, ema15_21, ema15_50 = ema_8, ema_21, ema_50  # safe fallbacks
     try:
         with warnings.catch_warnings():
@@ -88,11 +88,11 @@ def fetch_market_context(
     except Exception:
         pass
 
-    # â”€â”€ 3. Realized vol (30-day HV, annualized) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 3. Realized vol (30-day HV, annualized) ───────────────────────────────
     log_returns = np.log(closes / closes.shift(1)).dropna()
     rv_30 = float(log_returns.iloc[-30:].std() * np.sqrt(252)) if len(log_returns) >= 30 else 0.20
 
-    # â”€â”€ 4. IV rank via 52-week HV range â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 4. IV rank via 52-week HV range ───────────────────────────────────────
     # We use 252-day rolling 30-day HV as a proxy for historical IV levels.
     rolling_hv = log_returns.rolling(30).std() * np.sqrt(252)
     rolling_hv = rolling_hv.dropna()
@@ -110,11 +110,11 @@ def fetch_market_context(
         iv_rank = 50.0
         iv_percentile = 50.0
 
-    # â”€â”€ 5. VIX and VVIX â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 5. VIX and VVIX ───────────────────────────────────────────────────────
     market_vix = _fetch_index_close("^VIX", fallback=20.0)
     vvix = _fetch_index_close("^VVIX", fallback=market_vix * 5)
 
-    # â”€â”€ 6. Options chain â€” front + back month ATM IV, skew â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── 6. Options chain — front + back month ATM IV, skew ────────────────────
     # For historical backtests, use ML-predicted IV; for live, fetch real chain
     is_historical_backtest = analysis_date and analysis_date < datetime.date.today().isoformat()
 
@@ -151,7 +151,7 @@ def fetch_market_context(
         "back_month_iv": back_month_iv,
     }
 
-    # â”€â”€ 7. IV rank override: if we got real chain IV, use percentile method â”€â”€
+    # ── 7. IV rank override: if we got real chain IV, use percentile method ───
     if front_month_iv > 0 and len(rolling_hv) >= 50:
         # Normalize front_month_iv to decimal form [0, 1] if yfinance returned percentage
         front_iv_normalized = front_month_iv / 100.0 if front_month_iv > 1.0 else front_month_iv
@@ -163,7 +163,7 @@ def fetch_market_context(
             import logging
             logging.debug(
                 f"[{ticker}] IV below HV min: front_iv={front_month_iv:.4f} < hv_min={hv_min:.4f} "
-                f"(iv_rank={iv_rank:.0f}%) â€” market expecting calmer trading ahead"
+                f"(iv_rank={iv_rank:.0f}%) — market expecting calmer trading ahead"
             )
 
     # Validate IV rank before returning (catches 0-1 scale errors, negative values, etc.)
@@ -203,7 +203,7 @@ def fetch_market_context(
     }
 
 
-# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Helpers ────────────────────────────────────────────────────────────────
 
 def _fetch_index_close(symbol: str, fallback: float) -> float:
     try:
@@ -223,7 +223,7 @@ def _fetch_options_iv(
 ) -> tuple[float, float, float, float]:
     """Return (front_iv, back_iv, put_skew_iv, call_skew_iv) from the chain.
 
-    Falls back gracefully on any error â€” yfinance options data is unreliable
+    Falls back gracefully on any error — yfinance options data is unreliable
     for some tickers (ETFs, indices, non-optionable).
     """
     try:

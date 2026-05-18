@@ -124,25 +124,3 @@ def validate_market_context(context: Dict[str, Any], ticker: str = "UNKNOWN") ->
             logger.debug(f"[{ticker}] Auto-corrected realized_vol from 0-1 to 0-100 scale")
 
     return context
-
-
-if __name__ == "__main__":
-    # Test cases
-    test_cases = [
-        (50.0, "50 (valid)"),
-        (0.50, "0.50 (0-1 scale, should be 50)"),
-        (486, "486 (0-1 × 100 twice, should be ~49)"),
-        (4.86, "4.86 (0-1 × 10, should be ~49)"),
-        (-5.0, "-5 (negative, should be 0)"),
-        (105.0, "105 (>100, should be 100)"),
-        (None, "None (should default to 50)"),
-    ]
-
-    print("IV Rank Validation Tests:")
-    print("=" * 80)
-    for raw_value, description in test_cases:
-        try:
-            result = validate_and_normalize_iv_rank(raw_value, ticker="TEST")
-            print(f"  {description:<40} -> {result:.0f}%")
-        except Exception as e:
-            print(f"  {description:<40} -> ERROR: {e}")

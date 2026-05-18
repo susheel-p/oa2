@@ -6,15 +6,19 @@ Greenfield v2 of `OptionsAgents` (sibling dir `../OptionsAgents/`). v1 is the
 production paper-trading system; v2 is being built fresh to fix structural
 weaknesses without dual-code-path refactoring.
 
-## Current status (Phase A complete, Phase B in progress)
+## Current status (Phases A–F complete)
 
 Phases 0-5 shipped: 5 debaters + dealer agent + regime classifier + GLS consensus engine
-+ Thompson bandit. Pipeline runs end-to-end with all flags enabled. 141 tests passing.
++ Thompson bandit. Pipeline runs end-to-end with all flags enabled. 381 tests passing.
 
 Phase A complete: flow debater honest abstention, bandit warm-start script,
 EWMA correlation matrix wired into consensus engine.
 
-NOT yet production-ready. Remaining blocker: no sizing engine, no exit engine.
+Phase B complete: Kelly sizing engine (kelly.py, limits.py, cvar.py).
+Phase C complete: exit engine (exit.py, monitor.py, roll.py).
+Phase D complete: regime enhancements (session overlay, crisis leads, cross-asset, GEX walls).
+Phase E complete: flow adapter registry (yfinance/moomoo/tradier/options_whale/unusual_whales).
+Phase F complete: backtesting harness + A/B comparison vs v1 baseline.
 
 ## Original phase roadmap (completed)
 
@@ -34,11 +38,11 @@ These phases must complete before paper-trade cutover. Order is risk-priority.
 | Phase | Goal | Status | Gate |
 |---|---|---|---|
 | A | Honest debaters + live correlation + bandit warm-start | ✅ Complete | Required for signal integrity |
-| B | Sizing engine (Kelly + book limits + CVaR) | 🔨 In progress | Required before any live trading |
-| C | Exit engine (position monitor + rules + roll logic) | Blocked on B | Required for unattended running |
-| D | Regime enhancement (session overlay + crisis leads + cross-asset) | After A | Improves signal quality |
-| E | Real flow data (sweep tape, real PCR) | Data vendor decision | Unlocks flow debater |
-| F | Backtesting harness + A/B vs v1 | Ongoing | Gate for paper cutover |
+| B | Sizing engine (Kelly + book limits + CVaR) | ✅ Complete | Required before any live trading |
+| C | Exit engine (position monitor + rules + roll logic) | ✅ Complete | Required for unattended running |
+| D | Regime enhancement (session overlay + crisis leads + cross-asset) | ✅ Complete | Improves signal quality |
+| E | Real flow data (sweep tape, real PCR) | ✅ Complete | Unlocks flow debater |
+| F | Backtesting harness + A/B vs v1 | ✅ Complete | Gate for paper cutover |
 
 ### Phase A: Signal Integrity [COMPLETE]
 
