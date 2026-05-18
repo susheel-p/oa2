@@ -12,8 +12,8 @@ Design:
     5. Aggregate: accuracy by regime, confusion matrix, Sharpe, A/B table.
 
 Output:
-    JSON report → ~/.oa2/backtest/results_<timestamp>.json
-    Human-readable summary → stdout
+    JSON report -> ~/.oa2/backtest/results_<timestamp>.json
+    Human-readable summary -> stdout
 
 Usage:
     python scripts/backtest.py
@@ -26,7 +26,7 @@ Phase F2 validation:
     directional debater accuracy > 0.5 in trending regimes.
 
 Phase F3 A/B:
-    Compares v2 consensus against a SimpleBaseline (EMA20 > EMA50 → BULLISH,
+    Compares v2 consensus against a SimpleBaseline (EMA20 > EMA50 -> BULLISH,
     else BEARISH). The gap between v2 Sharpe and baseline Sharpe is the
     paper-cutover gate metric.
 """
@@ -190,6 +190,20 @@ def compute_daily_context(
 
     rv_iv_ratio = rv_30 / (rv_30 * 1.1) if rv_30 > 0 else 1.0  # simplified proxy
 
+    # P2.1 backtest support: synthesize put_call_skew from recent price action + VIX.
+    # Real-world proxy: when market is selling off into rising vol, dealers price
+    # in heavier put-side IV (skew up). When rallying with falling vol, call-skew rises.
+    # This is a synthetic stand-in until live IV-skew is wired from a data provider.
+    if day_idx >= 5:
+        recent_ret = (price - closes[day_idx - 5]) / closes[day_idx - 5] if closes[day_idx - 5] > 0 else 0.0
+        vix_pressure = max(0.0, (vix - 18.0) / 30.0)   # 0 at VIX=18, 1 at VIX=48
+        # Inverse: drawdown + high vix -> positive skew (puts expensive); rally + low vix -> negative
+        put_call_skew = -recent_ret * 0.8 + vix_pressure * 0.05
+        # Clip to plausible range observed in real markets
+        put_call_skew = max(-0.15, min(0.15, put_call_skew))
+    else:
+        put_call_skew = 0.0
+
     # 20-day price slope
     prices_20d = closes[max(0, day_idx - 19): day_idx + 1]
 
@@ -222,6 +236,7 @@ def compute_daily_context(
             "iv_rank": iv_rank,
             "rv_iv_ratio": rv_iv_ratio,
             "vix": vix,
+            "put_call_skew": put_call_skew,
         },
         "realized_vol": rv_30,
         "setup": {
@@ -383,9 +398,9 @@ def baseline_direction(context: dict[str, Any]) -> str:
     """Simple EMA-crossover baseline representing v1-style logic.
 
     Rules:
-        EMA20 > EMA50 AND VIX < 25 → BULLISH
-        EMA20 < EMA50 OR  VIX > 30 → BEARISH
-        Otherwise → NEUTRAL
+        EMA20 > EMA50 AND VIX < 25 -> BULLISH
+        EMA20 < EMA50 OR  VIX > 30 -> BEARISH
+        Otherwise -> NEUTRAL
     """
     ema_20 = context.get("ema_20", 0.0)
     ema_50 = context.get("ema_50", 0.0)
@@ -674,10 +689,10 @@ def print_report(metrics: BacktestMetrics) -> None:
     print(f"Paper cutover gate: {'READY' if metrics.cutover_ready else 'NOT READY'}")
     print(f"  {metrics.cutover_reason}")
     print()
-    print("Confusion matrix (predicted → actual):")
+    print("Confusion matrix (predicted -> actual):")
     for pred, actuals in sorted(metrics.confusion.items()):
         for actual, count in sorted(actuals.items()):
-            print(f"  {pred:<10} → {actual:<10} : {count}")
+            print(f"  {pred:<10} -> {actual:<10} : {count}")
     print("=" * 60)
 
 
@@ -741,7 +756,7 @@ def main() -> None:
 
     print_report(metrics)
     out_path = save_report(metrics, results)
-    print(f"\nFull report saved → {out_path}")
+    print(f"\nFull report saved -> {out_path}")
 
 
 if __name__ == "__main__":

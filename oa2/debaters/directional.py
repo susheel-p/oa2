@@ -1,23 +1,21 @@
 """Directional debater — tape/momentum perspective (quant-only, v2).
 
-Phase D5: Additive conviction fix — signals are now grouped by independent
-data source. Previously, all signals were counted as independent votes, but
-VWAP, EMA, and prior-close are all derived from the same price series and
-are therefore highly correlated. Counting them separately inflated conviction.
+Phase D5 + P1.1: signals grouped by independent data source.
 
-Signal groups (one vote per group — max conviction from group):
-    Group A (price momentum):  VWAP position, price vs prior close
-    Group B (EMA structure):   EMA-20 vs EMA-50 crossover, price vs EMA-20
-    Group C (oscillator):      RSI
-    Group D (structure):       multi-timeframe alignment
+Signal groups (one vote per group — independent data sources):
+    Group A (price momentum):     VWAP position, price vs prior close
+    Group B (EMA structure):      EMA-20 vs EMA-50 crossover, price vs EMA-20
+    Group C (oscillator):         RSI
+    Group D (structure):          multi-timeframe alignment
+    Group E (momentum confirm):   MACD histogram + volume surge + 20d breakout
 
 Conviction formula:
     base = 0.40
-    Per group in agreement: +0.12
-    Cross-group consensus (all 4 agree): ×1.15 multiplier
-    Capped at 0.90
+    Per group in agreement: +0.10  (5 groups now, was 0.12 for 4)
+    Cross-group consensus (all 5 agree): x1.15 multiplier
+    Capped at 0.80
 
-Misaligned trade penalty: ×0.75 if proposed structure contradicts tape direction.
+Misaligned trade penalty: x0.75 if proposed structure contradicts tape direction.
 """
 
 from __future__ import annotations
@@ -25,6 +23,32 @@ from __future__ import annotations
 from typing import Any
 
 from oa2.debaters.base import DebaterBase, DebaterOpinion, Direction
+
+
+def _ema_from_series(prices: list[float], span: int) -> float:
+    """Compute EMA from a price series. Returns last value, or last price if too short."""
+    if not prices:
+        return 0.0
+    if len(prices) < span:
+        return prices[-1]
+    alpha = 2.0 / (span + 1)
+    ema = prices[0]
+    for p in prices[1:]:
+        ema = alpha * p + (1 - alpha) * ema
+    return ema
+
+
+def _macd_histogram(prices: list[float]) -> float:
+    """MACD histogram = (EMA-12 - EMA-26) - signal-line (EMA-9 of MACD).
+
+    Simplified: returns (EMA-12 - EMA-26) when only 20 bars available.
+    Positive = bullish momentum, negative = bearish.
+    """
+    if len(prices) < 12:
+        return 0.0
+    ema_fast = _ema_from_series(prices, 12)
+    ema_slow = _ema_from_series(prices, 26) if len(prices) >= 26 else _ema_from_series(prices, min(len(prices), 20))
+    return ema_fast - ema_slow
 
 
 _BULLISH_STRUCTURES = {
@@ -113,6 +137,69 @@ def _group_d_vote(mtf_alignment: float) -> int:
     return 0
 
 
+def _group_e_vote(
+    prices_20d: list[float],
+    price: float,
+    volume: float,
+    avg_volume: float,
+) -> tuple[int, dict[str, float]]:
+    """Group E: momentum confirmation (MACD + volume surge + 20d breakout).
+
+    Three independent confirmation signals that, together, indicate strong
+    directional momentum vs. mean-reverting chop:
+        - MACD histogram (trend momentum)
+        - Volume surge (vol > 1.5x 20d avg)
+        - 20-day breakout (price > prior 20d high, or < prior 20d low)
+
+    Returns:
+        (vote, signals) where vote is +1/-1/0 and signals is a diagnostics dict.
+    """
+    bull, bear = 0, 0
+    signals = {"macd_hist": 0.0, "volume_ratio": 0.0, "breakout": 0}
+
+    # 1) MACD histogram from prices_20d
+    if prices_20d and len(prices_20d) >= 12:
+        hist = _macd_histogram(prices_20d)
+        signals["macd_hist"] = hist
+        # Threshold: 0.1% of price to avoid noise
+        threshold = price * 0.001
+        if hist > threshold:
+            bull += 1
+        elif hist < -threshold:
+            bear += 1
+
+    # 2) Volume surge (only confirms when also trending in price)
+    if avg_volume > 0 and volume > 0:
+        vol_ratio = volume / avg_volume
+        signals["volume_ratio"] = vol_ratio
+        if vol_ratio > 1.5 and prices_20d and len(prices_20d) >= 2:
+            # Volume surge confirms direction of recent price move
+            recent_change = prices_20d[-1] - prices_20d[-2]
+            if recent_change > 0:
+                bull += 1
+            elif recent_change < 0:
+                bear += 1
+
+    # 3) 20-day breakout
+    if prices_20d and len(prices_20d) >= 5:
+        prior = prices_20d[:-1] if len(prices_20d) > 1 else prices_20d
+        if prior:
+            prior_high = max(prior)
+            prior_low = min(prior)
+            if price > prior_high:
+                bull += 1
+                signals["breakout"] = 1
+            elif price < prior_low:
+                bear += 1
+                signals["breakout"] = -1
+
+    if bull > bear:
+        return 1, signals
+    if bear > bull:
+        return -1, signals
+    return 0, signals
+
+
 class DirectionalDebater(DebaterBase):
     """Argues from trend/momentum perspective.
 
@@ -138,6 +225,9 @@ class DirectionalDebater(DebaterBase):
         rsi = context.get("rsi", 50.0)
         atr = context.get("atr", 0.0)
         prior_close = context.get("prior_close", price)
+        volume = context.get("volume", 0.0)
+        avg_volume = context.get("avg_volume", 0.0)
+        prices_20d = context.get("prices_20d", []) or []
 
         setup = context.get("setup")
         mtf_alignment = 0.0
@@ -146,12 +236,14 @@ class DirectionalDebater(DebaterBase):
         elif hasattr(setup, "multi_timeframe_alignment"):
             mtf_alignment = setup.multi_timeframe_alignment
 
-        # --- Phase D5: grouped signal voting ---
+        # --- Phase D5 + P1.1: grouped signal voting (5 groups) ---
+        e_vote, e_signals = _group_e_vote(prices_20d, price, volume, avg_volume)
         group_votes = {
             "A_momentum": _group_a_vote(price, vwap, prior_close, atr),
             "B_ema": _group_b_vote(price, ema_20, ema_50),
             "C_rsi": _group_c_vote(rsi),
             "D_mtf": _group_d_vote(mtf_alignment),
+            "E_momentum_confirm": e_vote,
         }
 
         bull_groups = sum(1 for v in group_votes.values() if v == 1)
@@ -170,15 +262,16 @@ class DirectionalDebater(DebaterBase):
             tape_direction = Direction.NEUTRAL
             agreeing_groups = 0
 
-        # Conviction: base + per-agreeing-group bonus
-        tape_conviction = 0.40 + agreeing_groups * 0.12
+        # P1.1: 5 groups now; per-group bonus reduced from 0.12 -> 0.10 to keep cap honest
+        tape_conviction = 0.40 + agreeing_groups * 0.10
 
-        # Cross-group consensus multiplier: all 4 non-neutral groups agree
+        # Cross-group consensus multiplier: all 5 non-neutral groups agree
         active_groups = bull_groups + bear_groups
         if active_groups == n_groups and (bull_groups == n_groups or bear_groups == n_groups):
             tape_conviction *= 1.15   # unanimous across all independent sources
 
-        tape_conviction = min(tape_conviction, 0.90)
+        # P1.1: cap reduced from 0.90 -> 0.80 (more honest about signal quality)
+        tape_conviction = min(tape_conviction, 0.80)
 
         # --- Trade alignment check ---
         strategy = context.get("strategy")
@@ -215,6 +308,7 @@ class DirectionalDebater(DebaterBase):
             "ema_50": ema_50,
             "rsi": rsi,
             "group_votes": group_votes,
+            "group_e_signals": e_signals,
             "bull_groups": bull_groups,
             "bear_groups": bear_groups,
             "neutral_groups": neutral_groups,

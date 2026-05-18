@@ -571,40 +571,61 @@ class TestSentimentDebater:
         debater = SentimentDebater()
         assert debater.name == "sentiment"
 
-    def test_bullish_sentiment_bullish_structure(self):
-        """Bullish crowd sentiment + bullish structure → bullish."""
+    def test_bullish_iv_call_skew(self):
+        """IV call-skew (put_call_skew < -0.05) -> BULLISH @ 0.45 (P2.1)."""
         context = {
             "ticker": "SPY",
-            "sentiment_snapshot": {
-                "composite_score": 0.50,
-                "mention_count": 50,
-                "data_sources": ["reddit", "stocktwits", "moomoo"],
-            },
+            "vol_regime": {"put_call_skew": -0.08},
             "strategy": {"selected_structure": "LONG_CALL"},
         }
         debater = SentimentDebater()
         opinion = debater.debate(context)
 
         assert opinion.direction == Direction.BULLISH
-        assert opinion.conviction >= 0.45
-        assert opinion.signals_used["composite_score"] == 0.50
+        assert opinion.conviction == 0.45
+        assert opinion.signals_used["signal"] == "iv_call_skew_elevated"
 
-    def test_bearish_sentiment_bearish_structure(self):
-        """Bearish crowd sentiment + bearish structure → bearish."""
+    def test_bearish_iv_put_skew(self):
+        """IV put-skew (put_call_skew > +0.05) -> BEARISH @ 0.55 (P2.1)."""
         context = {
             "ticker": "QQQ",
-            "sentiment_snapshot": {
-                "composite_score": -0.60,
-                "mention_count": 45,
-                "data_sources": ["reddit", "stocktwits"],
-            },
+            "vol_regime": {"put_call_skew": 0.08},
             "strategy": {"selected_structure": "LONG_PUT"},
         }
         debater = SentimentDebater()
         opinion = debater.debate(context)
 
         assert opinion.direction == Direction.BEARISH
-        assert opinion.conviction >= 0.45
+        assert opinion.conviction == 0.55
+        assert opinion.signals_used["signal"] == "iv_put_skew_elevated"
+
+    def test_earnings_blackout(self):
+        """Earnings within 1 day -> NEUTRAL @ 0.20 (vol crush risk)."""
+        context = {
+            "ticker": "AAPL",
+            "earnings_snapshot": {"days_to_earnings": 0},
+            "vol_regime": {"put_call_skew": 0.10},  # would otherwise be bearish
+        }
+        debater = SentimentDebater()
+        opinion = debater.debate(context)
+
+        assert opinion.direction == Direction.NEUTRAL
+        assert opinion.conviction == 0.20
+        assert opinion.signals_used["signal"] == "earnings_blackout"
+
+    def test_call_put_ratio_tiebreaker(self):
+        """No IV skew + extreme call/put ratio -> weak directional (0.30)."""
+        context = {
+            "ticker": "SPY",
+            "vol_regime": {"put_call_skew": 0.01},  # within deadband
+            "flow_snapshot": {"call_put_ratio": 2.1},
+        }
+        debater = SentimentDebater()
+        opinion = debater.debate(context)
+
+        assert opinion.direction == Direction.BULLISH
+        assert opinion.conviction == 0.30
+        assert opinion.signals_used["signal"] == "cpr_bullish"
 
     def test_sentiment_structure_mismatch(self):
         """Bullish sentiment + bearish structure → conviction reduced."""
@@ -662,40 +683,32 @@ class TestSentimentDebater:
         assert opinion.conviction < 0.69
         assert opinion.conviction >= 0.25  # Floor applied
 
-    def test_no_sentiment_data_neutral_baseline(self):
-        """Missing sentiment snapshot → neutral direction, 0.20 conviction baseline."""
+    def test_no_data_neutral_baseline(self):
+        """No vol_regime / flow / sentiment data -> NEUTRAL @ 0.25 (P2.1)."""
         context = {
             "ticker": "SPY",
-            "sentiment_snapshot": None,
             "strategy": {"selected_structure": "LONG_CALL"},
         }
         debater = SentimentDebater()
         opinion = debater.debate(context)
 
         assert opinion.direction == Direction.NEUTRAL
-        assert opinion.conviction == 0.20
-        assert "error" in opinion.signals_used
+        assert opinion.conviction == 0.25
+        assert "days_to_earnings" in opinion.signals_used
 
     def test_signals_used_complete(self):
-        """All sentiment signals logged."""
+        """IV-skew path logs put_call_skew, signal type, and earnings context (P2.1)."""
         context = {
             "ticker": "SPY",
-            "sentiment_snapshot": {
-                "composite_score": 0.35,
-                "mention_count": 40,
-                "data_sources": ["reddit", "stocktwits", "moomoo"],
-            },
+            "vol_regime": {"put_call_skew": 0.07},
             "strategy": {"selected_structure": "VERTICAL_CALL_SPREAD"},
         }
         debater = SentimentDebater()
         opinion = debater.debate(context)
 
-        assert "composite_score" in opinion.signals_used
-        assert "mention_count" in opinion.signals_used
-        assert "data_sources" in opinion.signals_used
-        assert "proposed_structure" in opinion.signals_used
-        assert "sentiment_direction" in opinion.signals_used
-        assert "sources_count" in opinion.signals_used
+        assert "put_call_skew" in opinion.signals_used
+        assert "signal" in opinion.signals_used
+        assert "days_to_earnings" in opinion.signals_used
 
 
 # ─────────────────────────────────────────────────────────────────────────────

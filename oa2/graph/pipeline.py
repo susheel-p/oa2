@@ -27,6 +27,7 @@ from oa2.execution.exit import ExitEngine
 from oa2.execution.monitor import ChainProvider, PositionMonitor
 from oa2.performance.bandit import BanditEngine
 from oa2.regime.classifier import RegimeClassifier
+from oa2.regime.session import get_session_state, session_weight_multipliers
 from oa2.sizing.cvar import CVaRChecker
 from oa2.sizing.kelly import size_from_consensus
 from oa2.sizing.limits import GreeksBook
@@ -248,7 +249,28 @@ def run(
             ctx.attribution["bandit_weights"] = bandit_weights
             logger.log_detail("Bandit weights applied", {}, "L5")
 
-        consensus_engine = ConsensusEngine(regime=regime_id, prior_weights=bandit_weights)
+        # P1.2: session-state weight multipliers (intraday context).
+        # Pipeline clock is the source of truth.
+        try:
+            session_dt = clock.now()
+        except Exception:
+            session_dt = None
+        session_state = get_session_state(session_dt)
+        session_mults = session_weight_multipliers(session_state)
+        ctx.attribution["session_state"] = session_state.value
+        ctx.attribution["session_multipliers"] = session_mults
+
+        # Combine bandit + session multipliers into prior_weights for the engine.
+        prior_weights = None
+        if bandit_weights or session_mults:
+            debater_names = [op.debater_name for op in ctx.debater_opinions]
+            prior_weights = {}
+            for name in debater_names:
+                b = (bandit_weights or {}).get(name, 1.0)
+                s = session_mults.get(name, 1.0)
+                prior_weights[name] = b * s
+
+        consensus_engine = ConsensusEngine(regime=regime_id, prior_weights=prior_weights)
         ctx.consensus = consensus_engine.aggregate(ctx.debater_opinions)
 
         # P0#2: calibrate p_bull before it reaches Kelly. Identity mode when

@@ -76,7 +76,7 @@ def main() -> int:
 
     out = default_calibrator_path()
     cal.save(out)
-    print(f"Saved calibrator → {out}")
+    print(f"Saved calibrator -> {out}")
     return 0
 
 

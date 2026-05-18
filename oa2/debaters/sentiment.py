@@ -1,4 +1,24 @@
-"""Sentiment debater — crowd/news sentiment perspective (quant-only, v2)."""
+"""Sentiment debater — options market structure perspective (P2.1 rewrite).
+
+Phase P2.1: Replaced weak news/reddit sources with options market signals
+that are harder to game:
+
+Primary signal: IV put-call skew (from vol_regime.put_call_skew)
+    - put_skew > +0.05 (5%+): institutions hedging downside -> BEARISH conviction 0.55
+    - put_skew < -0.05: call buying spike -> BULLISH conviction 0.45 (weaker, can be FOMO)
+
+Secondary signal: Earnings calendar (if days_to_earnings <= 5)
+    - Within 1 day: NEUTRAL @ 0.20 (pre-earnings vol crush risk)
+    - Within 5 days: NEUTRAL @ 0.25 (awaiting catalyst)
+
+Tertiary signal: Call/put ratio extremes (tiebreaker only, capped at 0.30)
+    - > 1.8: BULLISH @ 0.30 (retail call buying, weak)
+    - < 0.6: BEARISH @ 0.30 (put buying, weak)
+
+Fallback: legacy sentiment_snapshot (composite_score) when no vol_regime data.
+
+Conviction range: [0.20, 0.55] — honest reflection of signal quality.
+"""
 
 from __future__ import annotations
 
@@ -7,132 +27,171 @@ from typing import Any
 from oa2.debaters.base import DebaterBase, DebaterOpinion, Direction
 
 
-_BULLISH_STRUCTURES = {
-    "LONG_CALL",
-    "LONG_STRADDLE",
-    "LONG_STRANGLE",
-    "LONG_GAMMA_SCALP",
-    "VERTICAL_CALL_SPREAD",
-    "DIAGONAL_SPREAD",
-}
+_IV_SKEW_BEARISH_THRESHOLD = 0.05   # put-IV > call-IV by 5%+
+_IV_SKEW_BULLISH_THRESHOLD = -0.05  # call-IV > put-IV by 5%+
+_CP_RATIO_BULLISH = 1.8
+_CP_RATIO_BEARISH = 0.6
 
-_BEARISH_STRUCTURES = {
-    "LONG_PUT",
-    "VERTICAL_PUT_SPREAD",
-}
 
-_NEUTRAL_STRUCTURES = {
-    "IRON_CONDOR",
-    "SHORT_PREMIUM_FADE",
-    "CALENDAR_CALL",
-    "CALENDAR_PUT",
-}
+def _extract_iv_skew(vol_regime: Any) -> float | None:
+    """Extract put_call_skew from vol_regime (dict or pydantic model). None if absent."""
+    if vol_regime is None:
+        return None
+    if isinstance(vol_regime, dict):
+        return vol_regime.get("put_call_skew")
+    return getattr(vol_regime, "put_call_skew", None)
+
+
+def _extract_days_to_earnings(context: dict[str, Any]) -> int:
+    """Pull days_to_earnings from earnings_snapshot or context. Defaults to 30 (clear)."""
+    earnings = context.get("earnings_snapshot") or {}
+    if isinstance(earnings, dict):
+        d = earnings.get("days_to_earnings")
+    else:
+        d = getattr(earnings, "days_to_earnings", None)
+    if d is None:
+        d = context.get("days_to_earnings", 30)
+    try:
+        return int(d)
+    except (TypeError, ValueError):
+        return 30
+
+
+def _extract_call_put_ratio(context: dict[str, Any]) -> float | None:
+    """Pull call/put ratio from flow_snapshot or sentiment_snapshot."""
+    flow = context.get("flow_snapshot") or {}
+    if isinstance(flow, dict):
+        cpr = flow.get("call_put_ratio")
+    else:
+        cpr = getattr(flow, "call_put_ratio", None)
+    if cpr is None:
+        sent = context.get("sentiment_snapshot") or {}
+        if isinstance(sent, dict):
+            cpr = sent.get("call_put_ratio")
+        else:
+            cpr = getattr(sent, "call_put_ratio", None)
+    return cpr
 
 
 class SentimentDebater(DebaterBase):
-    """Argues based on crowd/news sentiment alignment with proposed trade.
+    """Argues based on options market structure (IV skew + earnings + call/put ratio).
 
-    Signals:
-      - Composite sentiment score (−1.0 to +1.0)
-      - Mention count (strength of signal)
-      - Source diversity (Reddit, StockTwits, moomoo, yfinance)
+    Signal priority (strongest first):
+        1. IV put-call skew (institutional positioning, hardest to game)
+        2. Earnings calendar (binary risk-off filter)
+        3. Call/put ratio extremes (tiebreaker, weak signal)
 
-    Conviction: 0.45 + |score| × 0.40, discounted 0.75× if mention_count < 10.
-    Baseline on timeout: 0.20 (neutral, not zero).
+    Honest conviction range: [0.20, 0.55].
     """
 
     def __init__(self):
         super().__init__("sentiment")
 
     def debate(self, context: dict[str, Any]) -> DebaterOpinion:
-        """Assess sentiment alignment with proposed trade direction."""
         ticker = context.get("ticker", "UNKNOWN")
 
-        # Extract sentiment data (pre-fetched in context; real-time fetch deferred to async layer)
-        sentiment_data = context.get("sentiment_snapshot")
-
-        # If no sentiment data available, return neutral baseline
-        if not sentiment_data:
+        # ---- Filter 1: Earnings calendar ----
+        days_to_earnings = _extract_days_to_earnings(context)
+        if days_to_earnings <= 1:
             return DebaterOpinion(
                 debater_name=self.name,
                 direction=Direction.NEUTRAL,
                 conviction=0.20,
-                reasoning="No sentiment data available.",
-                signals_used={"error": "missing_sentiment_snapshot"},
+                reasoning=f"Earnings in {days_to_earnings}d -- avoid pre-announcement vol crush.",
+                signals_used={"days_to_earnings": days_to_earnings, "signal": "earnings_blackout"},
+            )
+        if days_to_earnings <= 5:
+            return DebaterOpinion(
+                debater_name=self.name,
+                direction=Direction.NEUTRAL,
+                conviction=0.25,
+                reasoning=f"Earnings in {days_to_earnings}d -- awaiting catalyst clarity.",
+                signals_used={"days_to_earnings": days_to_earnings, "signal": "earnings_window"},
             )
 
-        # Extract sentiment metrics
-        composite_score = 0.0
-        mention_count = 0
-        data_sources = []
+        # ---- Primary signal: IV put-call skew ----
+        vol_regime = context.get("vol_regime")
+        iv_skew = _extract_iv_skew(vol_regime)
 
-        if isinstance(sentiment_data, dict):
-            composite_score = sentiment_data.get("composite_score", 0.0)
-            mention_count = sentiment_data.get("mention_count", 0)
-            data_sources = sentiment_data.get("data_sources", [])
-        else:
-            composite_score = getattr(sentiment_data, "composite_score", 0.0)
-            mention_count = getattr(sentiment_data, "mention_count", 0)
-            data_sources = getattr(sentiment_data, "data_sources", [])
+        if iv_skew is not None:
+            if iv_skew >= _IV_SKEW_BEARISH_THRESHOLD:
+                return DebaterOpinion(
+                    debater_name=self.name,
+                    direction=Direction.BEARISH,
+                    conviction=0.55,
+                    reasoning=f"IV put-skew {iv_skew:+.3f} -- institutional downside hedging.",
+                    signals_used={
+                        "put_call_skew": iv_skew,
+                        "signal": "iv_put_skew_elevated",
+                        "days_to_earnings": days_to_earnings,
+                    },
+                )
+            if iv_skew <= _IV_SKEW_BULLISH_THRESHOLD:
+                return DebaterOpinion(
+                    debater_name=self.name,
+                    direction=Direction.BULLISH,
+                    conviction=0.45,
+                    reasoning=f"IV call-skew {iv_skew:+.3f} -- call demand spike.",
+                    signals_used={
+                        "put_call_skew": iv_skew,
+                        "signal": "iv_call_skew_elevated",
+                        "days_to_earnings": days_to_earnings,
+                    },
+                )
 
-        # Extract proposed structure
-        strategy = context.get("strategy")
-        proposed_structure = None
-        if strategy:
-            if isinstance(strategy, dict):
-                proposed_structure = strategy.get("selected_structure")
+        # ---- Tertiary: call/put ratio extremes (tiebreaker only) ----
+        cpr = _extract_call_put_ratio(context)
+        if cpr is not None:
+            if cpr > _CP_RATIO_BULLISH:
+                return DebaterOpinion(
+                    debater_name=self.name,
+                    direction=Direction.BULLISH,
+                    conviction=0.30,
+                    reasoning=f"Call/put ratio {cpr:.2f} -- weak retail bullish signal.",
+                    signals_used={"call_put_ratio": cpr, "signal": "cpr_bullish", "iv_skew": iv_skew},
+                )
+            if cpr < _CP_RATIO_BEARISH:
+                return DebaterOpinion(
+                    debater_name=self.name,
+                    direction=Direction.BEARISH,
+                    conviction=0.30,
+                    reasoning=f"Call/put ratio {cpr:.2f} -- weak put-buying signal.",
+                    signals_used={"call_put_ratio": cpr, "signal": "cpr_bearish", "iv_skew": iv_skew},
+                )
+
+        # ---- Fallback: legacy sentiment snapshot ----
+        sentiment_data = context.get("sentiment_snapshot")
+        if sentiment_data:
+            if isinstance(sentiment_data, dict):
+                composite = sentiment_data.get("composite_score", 0.0)
             else:
-                proposed_structure = getattr(strategy, "selected_structure", None)
+                composite = getattr(sentiment_data, "composite_score", 0.0)
+            if composite > 0.30:
+                return DebaterOpinion(
+                    debater_name=self.name,
+                    direction=Direction.BULLISH,
+                    conviction=0.30,
+                    reasoning=f"Fallback sentiment composite {composite:+.2f}.",
+                    signals_used={"composite_score": composite, "signal": "legacy_sentiment"},
+                )
+            if composite < -0.30:
+                return DebaterOpinion(
+                    debater_name=self.name,
+                    direction=Direction.BEARISH,
+                    conviction=0.30,
+                    reasoning=f"Fallback sentiment composite {composite:+.2f}.",
+                    signals_used={"composite_score": composite, "signal": "legacy_sentiment"},
+                )
 
-        # Compute base conviction
-        conviction_base = 0.45 + abs(composite_score) * 0.40
-        if mention_count < 10:
-            conviction_base = max(conviction_base * 0.85, 0.25)
-        conviction_base = min(conviction_base, 0.90)
-
-        # Determine direction and alignment
-        if composite_score > 0.30:
-            sentiment_direction = Direction.BULLISH
-            if proposed_structure in _BULLISH_STRUCTURES:
-                conviction = conviction_base
-                reasoning = f"Crowd bullish ({composite_score:+.2f}). {proposed_structure} aligns with sentiment."
-            elif proposed_structure in _BEARISH_STRUCTURES:
-                conviction = conviction_base * 0.75
-                reasoning = f"Crowd bullish but {proposed_structure} is bearish. Sentiment mismatch."
-            else:
-                conviction = 0.40
-                reasoning = f"Crowd bullish. {proposed_structure or 'Trade'} is neutral-directional."
-
-        elif composite_score < -0.30:
-            sentiment_direction = Direction.BEARISH
-            if proposed_structure in _BEARISH_STRUCTURES:
-                conviction = conviction_base
-                reasoning = f"Crowd bearish ({composite_score:+.2f}). {proposed_structure} aligns with sentiment."
-            elif proposed_structure in _BULLISH_STRUCTURES:
-                conviction = conviction_base * 0.75
-                reasoning = f"Crowd bearish but {proposed_structure} is bullish. Sentiment mismatch."
-            else:
-                conviction = 0.40
-                reasoning = f"Crowd bearish. {proposed_structure or 'Trade'} is neutral-directional."
-
-        else:
-            sentiment_direction = Direction.NEUTRAL
-            conviction = 0.35
-            reasoning = "Crowd sentiment is neutral; no directional bias."
-
-        signals = {
-            "composite_score": composite_score,
-            "mention_count": mention_count,
-            "data_sources": data_sources,
-            "proposed_structure": proposed_structure,
-            "sentiment_direction": sentiment_direction.value,
-            "sources_count": len(data_sources),
-        }
-
+        # ---- No actionable signal ----
         return DebaterOpinion(
             debater_name=self.name,
-            direction=sentiment_direction,
-            conviction=round(conviction, 3),
-            reasoning=reasoning,
-            signals_used=signals,
+            direction=Direction.NEUTRAL,
+            conviction=0.25,
+            reasoning="No actionable options market signal (skew flat, CPR neutral).",
+            signals_used={
+                "iv_skew": iv_skew,
+                "call_put_ratio": cpr if 'cpr' in locals() else None,
+                "days_to_earnings": days_to_earnings,
+            },
         )
