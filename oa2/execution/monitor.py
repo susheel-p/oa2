@@ -20,9 +20,35 @@ Usage:
 
 from __future__ import annotations
 
+import datetime as _dt
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
+
+from oa2.core.clock import Clock, SystemClock
+
+
+@dataclass
+class Leg:
+    """A single option leg of a multi-leg position.
+
+    Stored on OpenPosition so the book can re-mark Greeks from the live chain
+    each cycle instead of relying on the entry-time snapshot.
+
+    `side` is +1 for long, -1 for short. `contracts` is the per-leg multiplier
+    (typically 1; vertical / IC structures use 1 per leg with the position-level
+    `contracts` scaling the whole structure).
+    """
+    underlying: str
+    expiry: _dt.date
+    strike: float
+    right: str         # "C" or "P"
+    side: int          # +1 long, -1 short
+    contracts: int = 1
+
+
+ChainProvider = Callable[[str, _dt.date, float, str], dict[str, float] | None]
+"""(underlying, expiry, strike, right) -> {delta, vega, theta, price} or None."""
 
 
 @dataclass
@@ -66,6 +92,11 @@ class OpenPosition:
     current_underlying_price: float = 0.0
     current_dte: int = 0
     last_checked: float = field(default_factory=time.time)
+
+    # Legs are optional; structures registered before the legs refactor (and
+    # most existing tests) leave this empty and rely on entry-time Greeks.
+    legs: list[Leg] = field(default_factory=list)
+
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -98,11 +129,19 @@ class OpenPosition:
 
     @property
     def age_seconds(self) -> float:
+        """Wall-clock age. Prefer `age_seconds_against(clock)` in pipelines /
+        backtests so replay time, not OS time, drives age."""
         return time.time() - self.entry_time
 
     @property
     def age_days(self) -> float:
         return self.age_seconds / 86400.0
+
+    def age_seconds_against(self, clock: Clock) -> float:
+        return clock.now() - self.entry_time
+
+    def age_days_against(self, clock: Clock) -> float:
+        return self.age_seconds_against(clock) / 86400.0
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -128,8 +167,13 @@ class PositionMonitor:
     If concurrent access is needed, wrap with a lock at the pipeline level.
     """
 
-    def __init__(self):
+    def __init__(self, clock: Clock | None = None):
         self._positions: dict[str, OpenPosition] = {}
+        self._clock: Clock = clock or SystemClock()
+
+    @property
+    def clock(self) -> Clock:
+        return self._clock
 
     # ------------------------------------------------------------------
     # Registry management
@@ -178,7 +222,7 @@ class PositionMonitor:
             return None
 
         pos.current_pnl = current_pnl
-        pos.last_checked = time.time()
+        pos.last_checked = self._clock.now()
         if current_underlying_price is not None:
             pos.current_underlying_price = current_underlying_price
         if current_dte is not None:
@@ -217,7 +261,7 @@ class PositionMonitor:
 
     def positions_due_for_exit_check(self, max_age_seconds: float = 300.0) -> list[OpenPosition]:
         """Return positions not checked within max_age_seconds."""
-        cutoff = time.time() - max_age_seconds
+        cutoff = self._clock.now() - max_age_seconds
         return [p for p in self._positions.values() if p.last_checked < cutoff]
 
     def positions_near_expiry(self, dte_threshold: int = 2) -> list[OpenPosition]:
@@ -227,6 +271,69 @@ class PositionMonitor:
     def net_pnl(self) -> float:
         """Sum of current P&L across all open positions."""
         return sum(p.current_pnl for p in self._positions.values())
+
+    # ------------------------------------------------------------------
+    # Mark-to-market against a live options chain
+    # ------------------------------------------------------------------
+
+    def remark_greeks(self, chain_provider: ChainProvider) -> list[str]:
+        """Recompute each position's delta/vega/theta from the current chain.
+
+        For every position with legs registered, look up per-contract greeks for
+        each leg, apply side (+1 long / -1 short) and per-leg/structure
+        contracts, and sum into position-level dollar Greeks. Also refreshes
+        `current_dte` from the clock-relative days to nearest leg expiry, and
+        `last_checked`.
+
+        Positions without legs (legacy / synthetic test positions) are left
+        untouched and reported in the returned skipped-list.
+
+        Args:
+            chain_provider: callable (underlying, expiry, strike, right) ->
+                {"delta": float, "vega": float, "theta": float, "price": float}
+                or None if the contract is missing from the chain snapshot.
+
+        Returns:
+            List of trade_ids that could not be fully re-marked (no legs, or
+            at least one leg missing from the chain). The caller may choose to
+            force-exit, alert, or keep the stale snapshot.
+        """
+        today_et = self._clock.now_et().date()
+        skipped: list[str] = []
+
+        for pos in self._positions.values():
+            if not pos.legs:
+                skipped.append(pos.trade_id)
+                continue
+
+            d_sum = v_sum = t_sum = 0.0
+            missing = False
+            min_dte: int | None = None
+
+            for leg in pos.legs:
+                quote = chain_provider(leg.underlying, leg.expiry, leg.strike, leg.right)
+                if quote is None:
+                    missing = True
+                    break
+                mult = leg.side * leg.contracts * pos.contracts
+                d_sum += quote.get("delta", 0.0) * mult
+                v_sum += quote.get("vega", 0.0) * mult
+                t_sum += quote.get("theta", 0.0) * mult
+                dte = (leg.expiry - today_et).days
+                min_dte = dte if min_dte is None else min(min_dte, dte)
+
+            if missing:
+                skipped.append(pos.trade_id)
+                continue
+
+            pos.delta = d_sum
+            pos.vega = v_sum
+            pos.theta = t_sum
+            if min_dte is not None:
+                pos.current_dte = min_dte
+            pos.last_checked = self._clock.now()
+
+        return skipped
 
     def book_summary(self) -> dict[str, Any]:
         """Aggregate book summary for logging."""

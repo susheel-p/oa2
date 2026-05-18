@@ -67,45 +67,50 @@ class EWMACovariance:
         """Incorporate a new signed score observation for one debater.
 
         signed_score: +conviction for BULLISH, -conviction for BEARISH, 0 for NEUTRAL.
-        Call this once per debater per scan run.
+        Prefer update_batch() when multiple debaters report from the same scan —
+        single-debater updates cannot form cross-covariance terms for that scan.
         """
-        lam = self._lambda
-
-        if debater_name not in self._mean:
-            self._mean[debater_name] = signed_score
-            self._var[debater_name] = 0.0
-            self._n[debater_name] = 1
-            self._last[debater_name] = signed_score
-            return
-
-        old_mean = self._mean[debater_name]
-        new_mean = lam * old_mean + (1 - lam) * signed_score
-        old_var = self._var[debater_name]
-        new_var = lam * old_var + (1 - lam) * (signed_score - old_mean) ** 2
-
-        self._mean[debater_name] = new_mean
-        self._var[debater_name] = new_var
-        self._n[debater_name] = self._n[debater_name] + 1
-
-        # Update cross-covariances with all other debaters observed so far
-        for other, other_score in self._last.items():
-            if other == debater_name:
-                continue
-            key = frozenset([debater_name, other])
-            old_cov = self._cov.get(key, 0.0)
-            other_mean = self._mean.get(other, other_score)
-            new_cov = lam * old_cov + (1 - lam) * (signed_score - old_mean) * (other_score - other_mean)
-            self._cov[key] = new_cov
-
-        self._last[debater_name] = signed_score
+        self.update_batch({debater_name: signed_score})
 
     def update_batch(self, opinions: dict[str, float]) -> None:
-        """Update all debaters from one scan's opinions at once.
+        """Update all debaters from one scan's opinions atomically.
+
+        Computes deviations against pre-update means for ALL debaters first,
+        then commits new means/vars/covs. This makes the result independent of
+        the iteration order of `opinions`, which the prior implementation was
+        not (A's mean was updated before B's cross-cov used it).
 
         opinions: {debater_name: signed_score}
         """
+        lam = self._lambda
+
+        # Snapshot pre-update means so deviations are consistent across pairs.
+        pre_means = {name: self._mean.get(name, score) for name, score in opinions.items()}
+        deviations = {name: score - pre_means[name] for name, score in opinions.items()}
+
+        # Update per-debater mean / variance / count
         for name, score in opinions.items():
-            self.update(name, score)
+            if name not in self._mean:
+                self._mean[name] = score
+                self._var[name] = 0.0
+                self._n[name] = 1
+                self._last[name] = score
+                continue
+            dev = deviations[name]
+            self._mean[name] = lam * pre_means[name] + (1 - lam) * score
+            self._var[name] = lam * self._var[name] + (1 - lam) * dev * dev
+            self._n[name] += 1
+            self._last[name] = score
+
+        # Update pairwise covariances using the pre-update deviations.
+        names = list(opinions.keys())
+        for i, a in enumerate(names):
+            for b in names[i + 1:]:
+                # Only contribute a co-deviation if BOTH had prior history;
+                # otherwise pre_means[x] == score and dev is 0 anyway.
+                key = frozenset([a, b])
+                old_cov = self._cov.get(key, 0.0)
+                self._cov[key] = lam * old_cov + (1 - lam) * deviations[a] * deviations[b]
 
     def correlation(self, name1: str, name2: str) -> float:
         """Pearson correlation estimate between two debaters.

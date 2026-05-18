@@ -128,6 +128,26 @@ class GreeksBook:
         """Remove all positions (e.g., EOD reset)."""
         self._positions.clear()
 
+    def rebuild_from(self, positions: list) -> None:
+        """Wipe and re-register from an iterable of position-like records.
+
+        Intended to be called every cycle after the PositionMonitor has
+        re-marked Greeks against the live chain. Accepts anything with
+        `trade_id`, `underlying`, `delta`, `vega`, `theta`, and `contracts`
+        attributes (e.g. OpenPosition) — avoids importing the execution layer
+        from the sizing layer.
+        """
+        self._positions.clear()
+        for p in positions:
+            self._positions[p.trade_id] = PositionGreeks(
+                trade_id=p.trade_id,
+                underlying=p.underlying,
+                delta=p.delta,
+                vega=p.vega,
+                theta=p.theta,
+                contracts=getattr(p, "contracts", 1),
+            )
+
     # ------------------------------------------------------------------
     # Aggregation
     # ------------------------------------------------------------------

@@ -241,7 +241,8 @@ class TestExitEngine:
         old_entry = time.time() - (10 * 86400)
         pos = make_position(entry_time=old_entry, current_dte=15)
         decision = engine.evaluate(pos)
-        assert decision.should_exit
+        assert not decision.should_exit
+        assert decision.needs_review
         assert decision.reason == ExitReason.TIME_STOP
         assert decision.urgency == ExitUrgency.EVALUATE
 
@@ -258,7 +259,8 @@ class TestExitEngine:
         pos = make_position(direction="BULLISH", entry_regime=3, current_dte=15)
         context = {"regime_id": 7, "consensus_direction": "BEARISH"}
         decision = engine.evaluate(pos, context)
-        assert decision.should_exit
+        assert not decision.should_exit
+        assert decision.needs_review
         assert decision.reason == ExitReason.REGIME_FLIP
         assert decision.urgency == ExitUrgency.EVALUATE
 

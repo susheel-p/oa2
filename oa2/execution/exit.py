@@ -32,6 +32,7 @@ from enum import Enum
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from oa2.core.clock import Clock, SystemClock
 from oa2.execution.monitor import OpenPosition
 
 
@@ -63,7 +64,14 @@ class ExitUrgency(Enum):
 
 @dataclass
 class ExitDecision:
-    """Result of exit rule evaluation for one position."""
+    """Result of exit rule evaluation for one position.
+
+    Two distinct outcomes a rule can produce:
+      - should_exit=True   force-close the position now (urgency IMMEDIATE or EXECUTE)
+      - needs_review=True  flag for human / next-scan review (urgency EVALUATE)
+    A rule that fires sets exactly one of these — never both, never neither.
+    When no rule fires, both are False and reason/urgency are None.
+    """
     trade_id: str
     should_exit: bool
     reason: ExitReason | None
@@ -71,10 +79,16 @@ class ExitDecision:
     detail: str
     current_pnl: float
     current_dte: int
+    needs_review: bool = False
 
     @property
     def is_immediate(self) -> bool:
         return self.urgency == ExitUrgency.IMMEDIATE
+
+    @property
+    def fired(self) -> bool:
+        """True if any rule fired (close OR review)."""
+        return self.should_exit or self.needs_review
 
 
 class ExitEngine:
@@ -93,11 +107,13 @@ class ExitEngine:
         profit_target_pct: float = _PROFIT_TARGET_PCT,
         dte_emergency_threshold: int = _DTE_EMERGENCY_THRESHOLD,
         time_stop_days: int = _DEFAULT_TIME_STOP_DAYS,
+        clock: Clock | None = None,
     ):
         self.stop_loss_pct = stop_loss_pct
         self.profit_target_pct = profit_target_pct
         self.dte_emergency_threshold = dte_emergency_threshold
         self.time_stop_days = time_stop_days
+        self.clock: Clock = clock or SystemClock()
 
     def evaluate(self, position: OpenPosition, context: dict[str, Any] | None = None) -> ExitDecision:
         """Evaluate all exit rules for one position in priority order.
@@ -113,32 +129,32 @@ class ExitEngine:
 
         # Rule 1: Stop loss (highest priority — prevents blowup)
         decision = self._check_stop_loss(position)
-        if decision.should_exit:
+        if decision.fired:
             return decision
 
         # Rule 2: DTE emergency (avoid assignment on short legs)
         decision = self._check_dte_emergency(position)
-        if decision.should_exit:
+        if decision.fired:
             return decision
 
         # Rule 3: Hard EOD cutoff (intraday positions only)
         decision = self._check_hard_eod(position, context)
-        if decision.should_exit:
+        if decision.fired:
             return decision
 
         # Rule 4: Profit target
         decision = self._check_profit_target(position)
-        if decision.should_exit:
+        if decision.fired:
             return decision
 
         # Rule 5: Time stop
         decision = self._check_time_stop(position)
-        if decision.should_exit:
+        if decision.fired:
             return decision
 
         # Rule 6: Regime flip
         decision = self._check_regime_flip(position, context)
-        if decision.should_exit:
+        if decision.fired:
             return decision
 
         # No rule fired
@@ -161,8 +177,14 @@ class ExitEngine:
     def exits_required(
         self, positions: list[OpenPosition], context: dict[str, Any] | None = None
     ) -> list[ExitDecision]:
-        """Return only positions where should_exit=True."""
+        """Return only positions that must be force-closed (should_exit=True)."""
         return [d for d in self.evaluate_all(positions, context) if d.should_exit]
+
+    def reviews_required(
+        self, positions: list[OpenPosition], context: dict[str, Any] | None = None
+    ) -> list[ExitDecision]:
+        """Return only positions flagged for human / next-scan review."""
+        return [d for d in self.evaluate_all(positions, context) if d.needs_review]
 
     # ------------------------------------------------------------------
     # Individual rules
@@ -220,7 +242,7 @@ class ExitEngine:
         if not is_intraday:
             return self._no_exit(pos)
 
-        now_et = datetime.datetime.now(tz=ET)
+        now_et = self.clock.now_et()
         cutoff_reached = (
             now_et.hour > _EOD_CUTOFF_HOUR or
             (now_et.hour == _EOD_CUTOFF_HOUR and now_et.minute >= _EOD_CUTOFF_MINUTE)
@@ -268,14 +290,16 @@ class ExitEngine:
 
     def _check_time_stop(self, pos: OpenPosition) -> ExitDecision:
         """Rule 5: Flag for review after time_stop_days from entry."""
-        if pos.age_days >= self.time_stop_days:
+        age_days = pos.age_days_against(self.clock)
+        if age_days >= self.time_stop_days:
             return ExitDecision(
                 trade_id=pos.trade_id,
-                should_exit=True,
+                should_exit=False,
+                needs_review=True,
                 reason=ExitReason.TIME_STOP,
                 urgency=ExitUrgency.EVALUATE,
                 detail=(
-                    f"Time stop: position held {pos.age_days:.1f} days "
+                    f"Time stop: position held {age_days:.1f} days "
                     f">= {self.time_stop_days} day limit. Review for close."
                 ),
                 current_pnl=pos.current_pnl,
@@ -312,7 +336,8 @@ class ExitEngine:
         if direction_conflict:
             return ExitDecision(
                 trade_id=pos.trade_id,
-                should_exit=True,
+                should_exit=False,
+                needs_review=True,
                 reason=ExitReason.REGIME_FLIP,
                 urgency=ExitUrgency.EVALUATE,
                 detail=(
@@ -329,7 +354,8 @@ class ExitEngine:
         if regime_flipped:
             return ExitDecision(
                 trade_id=pos.trade_id,
-                should_exit=True,
+                should_exit=False,
+                needs_review=True,
                 reason=ExitReason.REGIME_FLIP,
                 urgency=ExitUrgency.EVALUATE,
                 detail=(
