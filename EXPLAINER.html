@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>oa2 — How It Works (Plain English)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f7f8fa;
+    color: #1a1a2e;
+    line-height: 1.75;
+    font-size: 16px;
+  }
+
+  /* ── nav ── */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: #1a1a2e;
+    padding: 0 2rem;
+    display: flex; align-items: center; gap: 1.5rem;
+    height: 52px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  nav .brand { color: #e2e8f0; font-weight: 700; font-size: 1rem; margin-right: auto; }
+  nav a { color: #94a3b8; text-decoration: none; font-size: 0.82rem; }
+  nav a:hover { color: #e2e8f0; }
+
+  /* ── layout ── */
+  .page { max-width: 900px; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+
+  /* ── hero ── */
+  .hero {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
+    color: #e2e8f0;
+    border-radius: 18px;
+    padding: 3rem 2.5rem;
+    margin-bottom: 3rem;
+    text-align: center;
+  }
+  .hero .badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #94d2bd;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-bottom: 1rem;
+  }
+  .hero h1 { font-size: 2.4rem; font-weight: 800; margin-bottom: 0.75rem; }
+  .hero p { font-size: 1.1rem; color: #94a3b8; max-width: 620px; margin: 0 auto; }
+
+  /* ── section ── */
+  .section {
+    background: #fff;
+    border-radius: 14px;
+    padding: 2rem 2.5rem;
+    margin-bottom: 2rem;
+    border: 1px solid #e9ecef;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  }
+  .section-header {
+    display: flex; align-items: center; gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  .section-header .icon {
+    font-size: 1.6rem;
+    width: 2.5rem; height: 2.5rem;
+    display: flex; align-items: center; justify-content: center;
+    background: #f1f5f9;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .section-header h2 { font-size: 1.3rem; font-weight: 700; color: #0f3460; }
+  .section-header .sub { font-size: 0.82rem; color: #64748b; margin-top: 2px; }
+
+  h3 { font-size: 1.05rem; font-weight: 700; color: #1a1a2e; margin: 1.5rem 0 0.5rem; }
+  p { color: #374151; margin-bottom: 0.9rem; }
+  p:last-child { margin-bottom: 0; }
+
+  /* ── analogy box ── */
+  .analogy {
+    background: #fffbeb;
+    border-left: 4px solid #f59e0b;
+    border-radius: 0 10px 10px 0;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+    font-size: 0.95rem;
+    color: #78350f;
+  }
+  .analogy strong { color: #92400e; }
+  .analogy::before { content: "🌟 Real-world example: "; font-weight: 700; }
+
+  /* ── callout ── */
+  .callout {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+    font-size: 0.95rem;
+    color: #14532d;
+  }
+  .callout.blue { background: #eff6ff; border-color: #bfdbfe; color: #1e3a5f; }
+  .callout.red  { background: #fff1f2; border-color: #fecdd3; color: #7f1d1d; }
+
+  /* ── layer cards ── */
+  .layers { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
+  .layer {
+    display: flex; align-items: flex-start; gap: 1rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+  }
+  .layer .num {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em;
+    background: #1a1a2e; color: #fff;
+    border-radius: 6px;
+    padding: 3px 8px;
+    white-space: nowrap;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+  .layer .title { font-weight: 700; font-size: 0.95rem; color: #0f3460; }
+  .layer .desc  { font-size: 0.88rem; color: #64748b; margin-top: 2px; }
+  .layer .plain { font-size: 0.88rem; color: #374151; margin-top: 4px; font-style: italic; }
+
+  /* ── debaters grid ── */
+  .debaters { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .debater {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .debater .dtitle { font-weight: 700; font-size: 0.95rem; color: #0f3460; display: flex; align-items: center; gap: 6px; }
+  .debater .dq { font-size: 0.85rem; color: #64748b; margin: 4px 0; }
+  .debater .drw { font-size: 0.83rem; color: #374151; }
+
+  /* ── regime grid ── */
+  .regimes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin: 1rem 0; }
+  @media (max-width: 600px) { .regimes { grid-template-columns: 1fr; } }
+  .regime {
+    border-radius: 10px;
+    padding: 1rem;
+    font-size: 0.88rem;
+  }
+  .regime .rtitle { font-weight: 700; margin-bottom: 4px; }
+
+  /* ── timeline ── */
+  .timeline { border-left: 3px solid #e2e8f0; margin: 1rem 0 1rem 0.5rem; padding-left: 1.5rem; }
+  .titem { position: relative; margin-bottom: 1.2rem; }
+  .titem::before {
+    content: "";
+    position: absolute; left: -1.85rem; top: 5px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #0f3460;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 2px #0f3460;
+  }
+  .titem .tlabel { font-weight: 700; font-size: 0.9rem; color: #0f3460; }
+  .titem p { margin-top: 3px; font-size: 0.88rem; color: #4b5563; margin-bottom: 0; }
+
+  /* ── table ── */
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 1rem 0; }
+  th { background: #f1f5f9; color: #374151; font-weight: 700; text-align: left; padding: 8px 12px; border-bottom: 2px solid #e2e8f0; }
+  td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; color: #374151; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafbfc; }
+
+  /* ── vote bars ── */
+  .vote-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 0.88rem; }
+  .vote-name { width: 110px; flex-shrink: 0; font-weight: 600; color: #374151; }
+  .vote-bar-wrap { flex: 1; background: #f1f5f9; border-radius: 99px; height: 14px; overflow: hidden; }
+  .vote-bar { height: 100%; border-radius: 99px; }
+  .bull { background: #10b981; }
+  .bear { background: #ef4444; }
+  .neu  { background: #94a3b8; }
+  .vote-label { font-size: 0.78rem; color: #64748b; width: 80px; text-align: right; flex-shrink: 0; }
+
+  /* ── gates ── */
+  .gates { display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
+  .gate {
+    display: flex; align-items: flex-start; gap: 1rem;
+    border-radius: 10px; padding: 0.9rem 1rem;
+    border: 1px solid;
+  }
+  .gate.g1 { background: #eff6ff; border-color: #bfdbfe; }
+  .gate.g2 { background: #f0fdf4; border-color: #bbf7d0; }
+  .gate.g3 { background: #fff7ed; border-color: #fed7aa; }
+  .gate .gnum { font-weight: 800; font-size: 1.1rem; flex-shrink: 0; }
+  .gate .gtitle { font-weight: 700; font-size: 0.95rem; }
+  .gate .gdesc  { font-size: 0.87rem; color: #4b5563; margin-top: 3px; }
+
+  /* ── exit rules ── */
+  .rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.8rem; margin: 1rem 0; }
+  .rule {
+    background: #fff1f2;
+    border: 1px solid #fecdd3;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    font-size: 0.88rem;
+  }
+  .rule .rtitle { font-weight: 700; color: #9f1239; margin-bottom: 4px; }
+
+  /* ── stat chips ── */
+  .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0; }
+  .chip {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 20px;
+    padding: 4px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #374151;
+  }
+  .chip.green { background: #f0fdf4; border-color: #bbf7d0; color: #14532d; }
+  .chip.blue  { background: #eff6ff; border-color: #bfdbfe; color: #1e3a5f; }
+
+  /* ── flow diagram ── */
+  .flow { display: flex; flex-direction: column; align-items: center; gap: 0; margin: 1.5rem 0; }
+  .flow-box {
+    background: #fff;
+    border: 2px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 0.6rem 1.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1a1a2e;
+    text-align: center;
+    min-width: 260px;
+  }
+  .flow-box.highlight { background: #0f3460; color: #fff; border-color: #0f3460; }
+  .flow-box.green { background: #10b981; color: #fff; border-color: #059669; }
+  .flow-box.red   { background: #ef4444; color: #fff; border-color: #dc2626; }
+  .flow-arrow { color: #94a3b8; font-size: 1.2rem; line-height: 1; margin: 2px 0; }
+
+  /* ── footer ── */
+  footer { text-align: center; color: #94a3b8; font-size: 0.82rem; margin-top: 3rem; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">oa2 — Plain English Guide</span>
+  <a href="#bigpicture">Big Picture</a>
+  <a href="#options">Options?</a>
+  <a href="#layers">9 Layers</a>
+  <a href="#universe">22 Stocks</a>
+  <a href="#regime">Weather</a>
+  <a href="#debaters">Experts</a>
+  <a href="#consensus">Voting</a>
+  <a href="#sizing">How Much</a>
+  <a href="#exit">When to Sell</a>
+  <a href="#learning">Learning</a>
+  <a href="#safety">Safety</a>
+  <a href="#lifecycle">A Trade's Life</a>
+</nav>
+
+<div class="page">
+
+  <!-- ── HERO ── -->
+  <div class="hero">
+    <div class="badge">OptionsAgents v2</div>
+    <h1>How oa2 Works</h1>
+    <p>A plain-English tour of the entire system — no jargon, no maths, lots of real-world stories. If you've ever ordered food from a restaurant you already understand most of it.</p>
+  </div>
+
+
+  <!-- ── BIG PICTURE ── -->
+  <div class="section" id="bigpicture">
+    <div class="section-header">
+      <div class="icon">🗺️</div>
+      <div>
+        <h2>The Big Picture</h2>
+        <div class="sub">What is this thing, really?</div>
+      </div>
+    </div>
+
+    <p><strong>oa2</strong> is a computer program that watches 22 well-known stocks and exchange-traded funds (ETFs) every day, decides whether it makes sense to place an options trade on any of them, figures out exactly how large that trade should be, places the order automatically, and then watches the trade around the clock until it's time to close it.</p>
+
+    <p>It does all of this by running the market data through <strong>9 specialised processing steps</strong> — like an assembly line — before a single trade is ever placed. Each step either adds more information or acts as a safety check. A trade only happens when <em>every</em> step gives the green light.</p>
+
+    <div class="analogy">
+      Think of it like a very careful restaurant kitchen. Before a dish leaves the kitchen it passes through the prep cook, the line cook, the sous chef, and the head chef — each checking something different. Only a perfect dish gets served. oa2 works the same way: a trade only reaches the customer (the market) after passing through every station.
+    </div>
+
+    <div class="chips">
+      <span class="chip green">✅ 456 automated tests</span>
+      <span class="chip green">✅ 22 stocks watched</span>
+      <span class="chip green">✅ 6 expert "debaters"</span>
+      <span class="chip green">✅ 3 safety gates before every trade</span>
+      <span class="chip blue">📍 Ready for supervised paper trading</span>
+    </div>
+  </div>
+
+
+  <!-- ── WHAT ARE OPTIONS ── -->
+  <div class="section" id="options">
+    <div class="section-header">
+      <div class="icon">🎟️</div>
+      <div>
+        <h2>What Is an Options Trade?</h2>
+        <div class="sub">A quick plain-English primer</div>
+      </div>
+    </div>
+
+    <p>A <strong>stock option</strong> is a contract that gives you the right (but not the obligation) to buy or sell a stock at a specific price, before a specific date. You pay a small premium upfront — like buying a ticket — and your maximum loss is just that ticket price.</p>
+
+    <div class="analogy">
+      Imagine you think a house currently worth $300,000 will be worth $350,000 in three months. Instead of buying the whole house (expensive!), you pay $2,000 to lock in the right to buy it at $300,000 within three months. If the price goes to $350,000, you make a big profit. If it doesn't, you just lose your $2,000 ticket price — not the whole house.
+    </div>
+
+    <h3>Why options instead of just buying stocks?</h3>
+    <p>Options let you profit from <em>how a stock moves</em>, not just whether it goes up. You can make money when a stock stays flat (by collecting premium), when it falls, when it gets more volatile, or when it gets less volatile. oa2 exploits all of these scenarios — choosing the right type of options trade for the current market environment.</p>
+
+    <h3>Key terms you'll see</h3>
+    <table>
+      <tr><th>Term</th><th>Plain English</th></tr>
+      <tr><td><strong>DTE</strong> (Days to Expiration)</td><td>How many days before the option contract expires. Like the "best before" date on food — closer to zero means the option decays faster.</td></tr>
+      <tr><td><strong>Premium</strong></td><td>The price you pay for the option contract — like a ticket price.</td></tr>
+      <tr><td><strong>IV Rank</strong> (Implied Volatility Rank)</td><td>How expensive options are right now vs their history. High IV Rank = expensive options = good time to sell. Low IV Rank = cheap options = good time to buy.</td></tr>
+      <tr><td><strong>Delta (Δ)</strong></td><td>How much the option price moves when the stock moves $1. A rough measure of directional risk — like how steeply a hill is sloped.</td></tr>
+      <tr><td><strong>Vega (V)</strong></td><td>How much the option changes in value when volatility moves. High vega = sensitive to market fear levels.</td></tr>
+      <tr><td><strong>Theta (Θ)</strong></td><td>How much value the option loses just by sitting there overnight — time decay. If you sold the option, theta works <em>for</em> you.</td></tr>
+      <tr><td><strong>Spread</strong></td><td>Buying one option and selling another to limit both risk and cost — like buying a discounted round-trip flight instead of open-ended travel.</td></tr>
+    </table>
+  </div>
+
+
+  <!-- ── 9 LAYERS ── -->
+  <div class="section" id="layers">
+    <div class="section-header">
+      <div class="icon">🏭</div>
+      <div>
+        <h2>The 9-Layer Assembly Line</h2>
+        <div class="sub">Every trade passes through all 9 stations</div>
+      </div>
+    </div>
+
+    <p>When oa2 evaluates any stock, the market data travels through 9 layers from top to bottom. Earlier layers provide context; later layers make decisions. Think of them as different specialists in an operating room, each doing their part before the surgeon makes the final cut.</p>
+
+    <div class="layers">
+      <div class="layer">
+        <span class="num">L0</span>
+        <div>
+          <div class="title">Market Data — Gathering the raw ingredients</div>
+          <div class="desc">Collects price, volume, options chain, news, social media sentiment, and flow data from multiple sources.</div>
+          <div class="plain">Like a shopper going to multiple grocery stores to get the freshest ingredients for dinner.</div>
+        </div>
+      </div>
+      <div class="layer">
+        <span class="num">L1</span>
+        <div>
+          <div class="title">Regime Detector — Reading the weather</div>
+          <div class="desc">Classifies the current market "weather" into one of 8 buckets based on volatility and trend. Is it calm? Stormy? Trending or choppy?</div>
+          <div class="plain">Like a farmer checking the weather before deciding which crops to plant today.</div>
+        </div>
+      </div>
+      <div class="layer">
+        <span class="num">L2</span>
+        <div>
+          <div class="title">Context Agents — Reading the room</div>
+          <div class="desc">Four read-only specialists check: big-bank positioning (GEX), macro conditions, upcoming events (earnings, Fed meetings), and whether it's actually easy to trade right now.</div>
+          <div class="plain">Like checking: what are the big players doing? Is anything major happening this week? Is the highway even open?</div>
+        </div>
+      </div>
+      <div class="layer">
+        <span class="num">L3</span>
+        <div>
+          <div class="title">Timeframe Router — Picking the right clock</div>
+          <div class="desc">Decides whether to look at intraday signals, daily signals, or weekly signals for this particular stock at this moment.</div>
+          <div class="plain">Like deciding whether to check traffic every 5 minutes or just once a day depending on your trip length.</div>
+        </div>
+      </div>
+      <div class="layer">
+        <span class="num">L4</span>
+        <div>
+          <div class="title">Debater Ensemble — 6 experts give opinions</div>
+          <div class="desc">Six independent expert modules each look at different aspects of the market and vote: Bullish, Bearish, or Neutral — each with a confidence level.</div>
+          <div class="plain">Like asking 6 different doctors to diagnose a patient. Each specialises in something different. None of them can see the others' diagnosis until they've made their own.</div>
+        </div>
+      </div>
+      <div class="layer">
+        <span class="num">L5</span>
+        <div>
+          <div class="title">Consensus Engine — Counting the votes properly</div>
+          <div class="desc">Combines the 6 opinions into one final direction. But not all votes are equal — experts who tend to agree with each other are down-weighted to avoid double-counting. Past accuracy also matters.</div>
+          <div class="plain">Like a jury that gives more weight to witnesses with track records of being right, and less weight when two witnesses are clearly just repeating each other.</div>
+        </div>
+      </div>
+      <div class="layer">
+        <span class="num">L6</span>
+        <div>
+          <div class="title">Sizing Engine — How many contracts to buy</div>
+          <div class="desc">Three consecutive safety checks determine exactly how many contracts to trade: Kelly formula (edge-based), Greeks budget (whole-portfolio balance), and CVaR stress test (worst-case scenario check).</div>
+          <div class="plain">Like a casino asking: given your edge, your current table exposure, and what happens if there's an earthquake — how many chips should you bet?</div>
+        </div>
+      </div>
+      <div class="layer">
+        <span class="num">L7</span>
+        <div>
+          <div class="title">Portfolio Orchestrator — Keeping the book balanced</div>
+          <div class="desc">Tracks all open trades together and ensures the whole portfolio doesn't get too lopsided — not too directional, not too much volatility exposure, not too much time decay.</div>
+          <div class="plain">Like making sure your investment portfolio isn't all in tech stocks even if every individual tech stock looks like a great deal.</div>
+        </div>
+      </div>
+      <div class="layer">
+        <span class="num">L8</span>
+        <div>
+          <div class="title">Execution & Learning — Place the trade, then watch it</div>
+          <div class="desc">Places the order via moomoo broker, assigns exit rules to every trade at birth, monitors all open positions in real time, and learns from what worked and what didn't.</div>
+          <div class="plain">Like a pilot who not only takes off but also monitors the flight continuously, has autopilot rules for turbulence, and reviews the flight data after landing.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ── 22 STOCKS ── -->
+  <div class="section" id="universe">
+    <div class="section-header">
+      <div class="icon">📋</div>
+      <div>
+        <h2>The 22 Stocks It Watches</h2>
+        <div class="sub">A focused list — not thousands of random stocks</div>
+      </div>
+    </div>
+
+    <p>oa2 deliberately watches only <strong>22 names</strong>. More is not better — a smaller, well-understood list means the system can develop deep, reliable knowledge about each one. It's the difference between a specialist doctor and a generalist seeing 1,000 random patients a day.</p>
+
+    <table>
+      <tr><th>Group</th><th>Tickers</th><th>Why they're in</th></tr>
+      <tr>
+        <td><strong>Indices</strong></td>
+        <td>SPY, QQQ, IWM, DIA</td>
+        <td>The whole market's pulse. SPY = S&P 500, QQQ = tech/growth, IWM = small companies, DIA = industrial giants. Very liquid, tight spreads, best for options.</td>
+      </tr>
+      <tr>
+        <td><strong>Macro ETFs</strong></td>
+        <td>GLD, SLV, TLT, USO</td>
+        <td>Gold, Silver, bonds (TLT), and oil (USO) reveal "risk-on vs risk-off" mode — whether big money is hiding in safety or going for growth.</td>
+      </tr>
+      <tr>
+        <td><strong>Sector ETFs</strong></td>
+        <td>XLF, XLE, XLK, XLV, XLI, XLY</td>
+        <td>Finance, Energy, Technology, Healthcare, Industrials, Consumer. When one sector turns before others, it signals what's coming.</td>
+      </tr>
+      <tr>
+        <td><strong>Mega-caps</strong></td>
+        <td>NVDA, TSLA, AAPL, MSFT, AMZN, META, GOOGL, AMD</td>
+        <td>The most-watched individual stocks. High options volume means real price signals. Trading is blocked 2 days before earnings — that's too much randomness.</td>
+      </tr>
+    </table>
+
+    <div class="analogy">
+      Think of the 22 as a curated "greatest hits" playlist — not every song ever made, but the ones you can reliably dance to. The system gets better at a focused list than it would jumping between thousands of unknowns.
+    </div>
+  </div>
+
+
+  <!-- ── REGIME ── -->
+  <div class="section" id="regime">
+    <div class="section-header">
+      <div class="icon">🌦️</div>
+      <div>
+        <h2>Reading the Market "Weather"</h2>
+        <div class="sub">Why the same trade can be great or terrible depending on conditions</div>
+      </div>
+    </div>
+
+    <p>Markets cycle through different "weather" conditions just like the real sky. Selling a short-premium options trade when the market is panicking is like selling umbrellas right before the storm hits — your inventory gets wiped out. Selling premium in a calm trending market? Profitable and predictable.</p>
+
+    <p>oa2 classifies the current environment into one of <strong>8 buckets</strong> by crossing two measurements:</p>
+
+    <div class="regimes">
+      <div class="regime" style="background:#eff6ff;border:1px solid #bfdbfe;">
+        <div class="rtitle" style="color:#1e3a5f;">📉 Volatility Compression</div>
+        Options are cheap. The market is quiet. Like a calm summer day — good for buying protection cheaply, bad for selling it.
+      </div>
+      <div class="regime" style="background:#f0fdf4;border:1px solid #bbf7d0;">
+        <div class="rtitle" style="color:#14532d;">😐 Normal Volatility</div>
+        Standard market conditions. Neither cheap nor expensive. The "partly cloudy" of market weather — standard playbook.
+      </div>
+      <div class="regime" style="background:#fff7ed;border:1px solid #fed7aa;">
+        <div class="rtitle" style="color:#7c2d12;">🌩️ Volatility Expansion</div>
+        Options are expensive — fear is elevated. Premium selling opportunity: collect fat premiums, but manage risk tightly.
+      </div>
+      <div class="regime" style="background:#fff1f2;border:1px solid #fecdd3;">
+        <div class="rtitle" style="color:#9f1239;">🚨 Crisis</div>
+        VIX above 35 or real volatility outpacing implied. Like a hurricane warning — drastically smaller positions, defensive trades only. Overrides everything else.
+      </div>
+    </div>
+
+    <p>Each of these is crossed with the <strong>trend state</strong>: is the market <em>trending</em> (clear direction), <em>mean-reverting</em> (bouncing between levels), or <em>neutral</em> (undecided)? That gives 8 combinations — 4 volatility states × 2 main trend states (simplified).</p>
+
+    <h3>Intraday session overlay</h3>
+    <p>On top of the daily regime, oa2 also tracks <strong>time of day</strong>. The first 30 minutes after the opening bell (9:30–10:00 AM) behave completely differently from midday (12:00–2:00 PM). At the open, big orders are landing, flows are meaningful, and prices jump around. At midday, it's sleepy — perfect for slow theta collection. The system adjusts which experts to trust based on the time of day.</p>
+
+    <div class="analogy">
+      A surfer reads both the swell (daily regime) and the tide schedule (time of day). The same beach can be great at low tide and dangerous at high tide. oa2 does the same thing with market conditions.
+    </div>
+  </div>
+
+
+  <!-- ── DEBATERS ── -->
+  <div class="section" id="debaters">
+    <div class="section-header">
+      <div class="icon">🗣️</div>
+      <div>
+        <h2>The 6 Expert "Debaters"</h2>
+        <div class="sub">Each looks at a completely different piece of evidence</div>
+      </div>
+    </div>
+
+    <p>Before any vote is taken, <strong>6 independent expert modules</strong> each examine the market data through their own specialised lens and return a verdict: <em>Bullish</em> (expect stock to rise), <em>Bearish</em> (expect it to fall), or <em>Neutral</em> (not enough evidence). Each verdict comes with a confidence score from 0.0 (no idea) to 1.0 (very confident).</p>
+
+    <p>Crucially, each expert is <strong>not allowed to see the others' verdicts</strong> before forming their own. This prevents herd thinking — if one expert is confidently wrong, the others won't blindly follow.</p>
+
+    <div class="debaters">
+      <div class="debater">
+        <div class="dtitle">📈 Directional</div>
+        <div class="dq">Question: which way is price moving?</div>
+        <div class="drw">Looks at: price vs moving averages, momentum, breakouts. <br><em>Like a track coach who watches if the runner is accelerating or slowing down.</em></div>
+      </div>
+      <div class="debater">
+        <div class="dtitle">💰 Income</div>
+        <div class="dq">Question: is this a good time to sell premium?</div>
+        <div class="drw">Looks at: how expensive options are (IV rank), skew, term structure. <br><em>Like an insurance salesperson checking if premiums are high enough to justify the risk.</em></div>
+      </div>
+      <div class="debater">
+        <div class="dtitle">🌊 Volatility</div>
+        <div class="dq">Question: is vol going up or down?</div>
+        <div class="drw">Looks at: VIX, vol-of-vol (VVIX), term structure shape. <br><em>Like a meteorologist who specialises in storm forecasting — not where you'll go, but how rough the ride will be.</em></div>
+      </div>
+      <div class="debater">
+        <div class="dtitle">🐋 Flow</div>
+        <div class="dq">Question: what are the big money traders doing?</div>
+        <div class="drw">Looks at: call/put sweeps, dark pool prints, OI changes. <br><em>Like watching where the whales swim — if big funds are quietly buying calls, that's a signal.</em></div>
+        <div style="font-size:0.8rem;color:#ef4444;margin-top:6px;">⚠️ Abstains completely if no real-time tape data is available. No fake signals.</div>
+      </div>
+      <div class="debater">
+        <div class="dtitle">📱 Sentiment</div>
+        <div class="dq">Question: what is the crowd feeling?</div>
+        <div class="drw">Looks at: Reddit (r/wallstreetbets), StockTwits, news headlines. <br><em>Like a town hall meeting — you can't trade on Twitter rumours alone, but crowd panic or euphoria is a real signal.</em></div>
+      </div>
+      <div class="debater">
+        <div class="dtitle">🏦 Dealer</div>
+        <div class="dq">Question: what position are market makers holding?</div>
+        <div class="drw">Looks at: Gamma Exposure (GEX), call walls, put walls, max pain. Only active for SPY/QQQ/IWM. <br><em>Like knowing what position the casino dealer is holding — market makers hedge mechanically, which creates predictable price magnetism.</em></div>
+      </div>
+    </div>
+
+    <div class="callout blue">
+      <strong>Honest abstention rule:</strong> any debater who doesn't have high-quality data on a given day must say "I don't know" instead of guessing. The flow debater, for example, returns a confidence of exactly 0.0 if real-time order flow isn't available. The system is designed to be wrong less often by saying nothing when it doesn't know.
+    </div>
+  </div>
+
+
+  <!-- ── CONSENSUS ── -->
+  <div class="section" id="consensus">
+    <div class="section-header">
+      <div class="icon">⚖️</div>
+      <div>
+        <h2>Counting the Votes — The Consensus Engine</h2>
+        <div class="sub">Not all votes are created equal</div>
+      </div>
+    </div>
+
+    <p>When all 6 experts have voted, the Consensus Engine combines them into a single direction and confidence score. But this is <strong>not a simple average</strong>. Three things make it smarter:</p>
+
+    <h3>1. Correlated experts get down-weighted</h3>
+    <p>If two experts tend to always agree with each other, their combined vote only counts as roughly one vote — not two. They're probably looking at related data (e.g., price momentum and moving-average crossover both come from the same price series). Treating them as independent would inflate your confidence.</p>
+
+    <div class="analogy">
+      Imagine asking five friends whether to bring an umbrella. If three of them are checking the same weather app, that's really only two independent opinions (the three app-checkers count as one). A smart jury weighs independent sources more heavily.
+    </div>
+
+    <h3>2. High-conviction experts get more weight</h3>
+    <p>An expert who says "BULLISH with 90% confidence" gets more influence than one who says "BULLISH with 30% confidence." A doctor who says "I'm almost certain this is appendicitis" should outweigh a colleague who says "it might be appendicitis, maybe."</p>
+
+    <h3>3. Track record matters — the Bandit</h3>
+    <p>Over time, the system tracks <em>which debater was right in which market regime</em>. For example, the flow debater might be very accurate when the market is in a TRENDING + NORMAL state, but unreliable in CRISIS mode. The consensus engine uses a <strong>Thompson sampling bandit</strong> to automatically give more weight to whoever has been most accurate in the <em>current</em> regime.</p>
+
+    <div class="analogy">
+      Think of a sports team with 6 specialists. You wouldn't use your sprinter in a swimming race. The bandit is the coach who knows which player performs best in which conditions and adjusts the starting lineup accordingly.
+    </div>
+
+    <h3>Example vote in action</h3>
+    <p>Here's what a typical vote might look like for SPY on a bullish trending day:</p>
+
+    <div class="vote-row"><span class="vote-name">Directional</span><div class="vote-bar-wrap"><div class="vote-bar bull" style="width:75%"></div></div><span class="vote-label">BULLISH ×0.75</span></div>
+    <div class="vote-row"><span class="vote-name">Income</span><div class="vote-bar-wrap"><div class="vote-bar bull" style="width:65%"></div></div><span class="vote-label">BULLISH ×0.65</span></div>
+    <div class="vote-row"><span class="vote-name">Volatility</span><div class="vote-bar-wrap"><div class="vote-bar neu" style="width:50%"></div></div><span class="vote-label">NEUTRAL ×0.50</span></div>
+    <div class="vote-row"><span class="vote-name">Flow</span><div class="vote-bar-wrap"><div class="vote-bar bull" style="width:60%"></div></div><span class="vote-label">BULLISH ×0.60</span></div>
+    <div class="vote-row"><span class="vote-name">Sentiment</span><div class="vote-bar-wrap"><div class="vote-bar bear" style="width:40%"></div></div><span class="vote-label">BEARISH ×0.40</span></div>
+    <div class="vote-row"><span class="vote-name">Dealer</span><div class="vote-bar-wrap"><div class="vote-bar bull" style="width:70%"></div></div><span class="vote-label">BULLISH ×0.70</span></div>
+
+    <p style="margin-top:1rem;">After correlation-aware weighting, the consensus comes out <strong>BULLISH with p_bull ≈ 0.72</strong> — meaning the system believes there's roughly a 72% probability that the bullish trade is right. That number feeds directly into the next step: how much to bet.</p>
+  </div>
+
+
+  <!-- ── SIZING ── -->
+  <div class="section" id="sizing">
+    <div class="section-header">
+      <div class="icon">🎯</div>
+      <div>
+        <h2>How Much to Trade — The Sizing Engine</h2>
+        <div class="sub">The hardest problem in trading: how many contracts?</div>
+      </div>
+    </div>
+
+    <p>Having a correct direction is only half the battle. Betting too much on a correct trade can still wipe you out if the timing is off. Betting too little wastes the opportunity. The sizing engine runs <strong>three consecutive checks</strong> — a trade only gets approved if it passes all three.</p>
+
+    <div class="gates">
+      <div class="gate g1">
+        <span class="gnum">①</span>
+        <div>
+          <div class="gtitle">Kelly Formula — "How much does your edge say to bet?"</div>
+          <div class="gdesc">Uses the consensus probability (e.g., 72%) and the trade's payout ratio (max profit vs max loss) to calculate the mathematically optimal bet size. Uses ¼-Kelly (25% of the formula) to stay conservative. Adjusts down further if the trade is close to expiration.</div>
+        </div>
+      </div>
+      <div class="gate g2">
+        <span class="gnum">②</span>
+        <div>
+          <div class="gtitle">Greeks Budget — "Is the whole portfolio still balanced?"</div>
+          <div class="gdesc">Checks the proposed trade against the <em>entire book of open positions</em>. Hard limits: net directional exposure cannot exceed 30% of account; daily time-decay cannot exceed 2% of account; no single stock can dominate more than 25% of the portfolio's risk. If adding this trade would breach any cap, the size is reduced or the trade is rejected.</div>
+        </div>
+      </div>
+      <div class="gate g3">
+        <span class="gnum">③</span>
+        <div>
+          <div class="gtitle">CVaR Stress Test — "What's the worst realistic case?"</div>
+          <div class="gdesc">Runs 5 nightmare scenarios before approving: stock drops 3%, stock drops 5%, VIX spikes +10, VIX spikes +20 (crisis), and every position moves against you at once. If any scenario would lose more than 5% of the account, the size is cut until it fits — or the trade is rejected entirely.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="analogy">
+      Think of a pilot's pre-flight checklist. Gate ① is "do we have enough fuel for the trip?" Gate ② is "is the weight distribution safe?" Gate ③ is "what happens if we hit severe turbulence or lose an engine?" Every gate must be cleared before wheels-up. No single opinion can override all three checks.
+    </div>
+
+    <h3>DTE-aware sizing</h3>
+    <p>Options close to expiration are like ice cream left on a warm counter — they deteriorate fast. An option with 1 day left can lose all its value overnight. oa2 automatically reduces the trade size as expiration approaches: full size from 7–45 days out, 75% at 46+ days, 75% at 3–6 days, and only 50% in the last 2 days (where gamma makes options behave erratically).</p>
+  </div>
+
+
+  <!-- ── EXIT ── -->
+  <div class="section" id="exit">
+    <div class="section-header">
+      <div class="icon">🚪</div>
+      <div>
+        <h2>Knowing When to Sell — The Exit Engine</h2>
+        <div class="sub">Every trade has a birth certificate and a scheduled check-up</div>
+      </div>
+    </div>
+
+    <p>The moment a trade is approved, the exit engine <strong>immediately assigns it exit conditions</strong> — like discharge instructions after a hospital procedure. These are checked against every open position continuously during market hours.</p>
+
+    <p>Six rules run in priority order. When the first rule fires, action is taken immediately — the lower rules don't even get evaluated:</p>
+
+    <div class="rules">
+      <div class="rule">
+        <div class="rtitle">🛑 Hard Stop Loss</div>
+        Loss reaches the maximum pre-defined dollar amount → close immediately, no questions asked.
+      </div>
+      <div class="rule">
+        <div class="rtitle">🎯 Profit Target</div>
+        Gain reaches 50% of maximum possible profit → close and bank it. Don't get greedy and give it back.
+      </div>
+      <div class="rule">
+        <div class="rtitle">⏰ DTE Emergency</div>
+        Options expire in fewer than 2 days → close immediately to avoid assignment (being forced to buy/sell 100 shares).
+      </div>
+      <div class="rule">
+        <div class="rtitle">📅 Time Stop</div>
+        Position has been held longer than planned (e.g., 21 days) → evaluate whether to hold or fold.
+      </div>
+      <div class="rule">
+        <div class="rtitle">🔔 Hard EOD Close</div>
+        3:55 PM ET every day → all intraday positions are force-closed before the market shuts.
+      </div>
+      <div class="rule">
+        <div class="rtitle">🔄 Regime Flip</div>
+        Market conditions changed (e.g., went from calm to crisis) → re-run the experts; if they now disagree with the trade direction, close it.
+      </div>
+    </div>
+
+    <div class="analogy">
+      Think of these as the rules your babysitter has: (1) If the baby cries for more than X minutes, call the parents. (2) If the baby finishes dinner, give dessert and call it done. (3) If bedtime arrives, put the baby to sleep regardless. Rules are set in advance precisely so that panic doesn't lead to bad real-time decisions.
+    </div>
+
+    <h3>Roll logic</h3>
+    <p>When a short-premium trade is doing well (collected over 25% of its maximum profit), has 2 weeks or less before expiration, and the market conditions haven't changed — the system evaluates whether to "roll" it forward: close the current trade and open a fresh one at a later expiration date to collect more premium, instead of just closing outright.</p>
+  </div>
+
+
+  <!-- ── LEARNING ── -->
+  <div class="section" id="learning">
+    <div class="section-header">
+      <div class="icon">🧠</div>
+      <div>
+        <h2>Getting Smarter Over Time — The Bandit</h2>
+        <div class="sub">The system that learns which expert to trust and when</div>
+      </div>
+    </div>
+
+    <p>oa2 uses a <strong>Thompson sampling bandit</strong> — a type of learning algorithm — to track which debater has been most accurate in each market regime. There are 6 debaters and 8 regime buckets, giving <strong>48 separate "track records"</strong> maintained independently.</p>
+
+    <p>Each track record is a Beta distribution — a probability estimate that gets updated every time a debater's call is right or wrong. When the bandit is confident that "the income debater is very reliable in HIGH VOLATILITY + TRENDING markets," it gives that debater more weight in the consensus engine for those conditions — automatically, without human intervention.</p>
+
+    <div class="analogy">
+      Imagine a basketball coach tracking each player's shooting percentage for every court zone (left corner, right elbow, paint, etc.). Over time, the coach knows Player A is best from the left corner and Player B is best from three-point range. The coach adjusts the plays accordingly. The bandit is that coach — except it's tracking 48 zone/player combinations simultaneously and never forgets a statistic.
+    </div>
+
+    <h3>Cold-start problem</h3>
+    <p>A brand-new system has no history — so the bandit has no useful statistics yet. To solve this, oa2 <strong>pre-loads 6 months of historical data</strong> before going live: it replays every day of the past 6 months through the full system, records what each debater would have said, compares it to what actually happened next day, and uses that to seed the bandit's statistics. This is called "warm-starting" and means the system begins its first real day of trading with meaningful beliefs rather than starting from scratch.</p>
+
+    <h3>EWMA correlation tracker</h3>
+    <p>The consensus engine also tracks how correlated the debaters are to each other using <strong>EWMA</strong> (Exponentially Weighted Moving Average). Recent observations matter more than old ones (decay factor 0.94 — each new observation is ~6% of the update). This means if two debaters started diverging from each other recently, the system recognises this quickly and adjusts their combined weight accordingly — instead of relying on assumptions made months ago.</p>
+  </div>
+
+
+  <!-- ── SAFETY ── -->
+  <div class="section" id="safety">
+    <div class="section-header">
+      <div class="icon">🛡️</div>
+      <div>
+        <h2>Safety-First Design</h2>
+        <div class="sub">Everything that can go wrong has a planned response</div>
+      </div>
+    </div>
+
+    <p>Trading systems fail in specific, predictable ways. oa2 was designed with each failure mode explicitly in mind and a response built in before it was ever deployed:</p>
+
+    <table>
+      <tr><th>What could go wrong</th><th>What oa2 does instead</th></tr>
+      <tr><td>No data available for a debater</td><td>The debater abstains (returns 0 confidence) rather than fabricating a signal</td></tr>
+      <tr><td>Two experts are perfectly correlated and act as one</td><td>Their combined vote is automatically down-weighted so they can't double-count</td></tr>
+      <tr><td>Earnings announcement in 2 days</td><td>Mega-cap trades are hard-blocked 2 trading days before earnings — too unpredictable</td></tr>
+      <tr><td>Market enters crisis mode suddenly</td><td>A leading crisis signal (VIX term structure, vol-of-vol) fires <em>before</em> VIX hits 35 — the system starts reducing size early</td></tr>
+      <tr><td>Sizing engine rejects every trade (too conservative)</td><td>Kelly fraction, caps, and CVaR thresholds are calibrated against backtest data to balance safety with activity</td></tr>
+      <tr><td>Position held too long, market conditions change</td><td>Regime-flip exit rule fires within the same trading session the conditions change</td></tr>
+      <tr><td>moomoo broker unavailable</td><td>Data falls back to yfinance automatically; trade execution pauses until broker reconnects</td></tr>
+      <tr><td>Bandit has no history (cold start)</td><td>Pre-loaded with 6 months of historical replay before first live use</td></tr>
+      <tr><td>Correlation matrix is singular (can't be inverted)</td><td>Ridge regularisation (tiny constant added to diagonal) ensures the matrix always inverts safely</td></tr>
+    </table>
+
+    <div class="callout red">
+      <strong>Hard rule — no override:</strong> The sizing engine's three gates (Kelly, Greeks caps, CVaR) cannot be bypassed by any other part of the system. Even if all 6 experts vote unanimously BULLISH with 100% confidence, the trade is still rejected if it would push portfolio risk beyond the safety limits.
+    </div>
+  </div>
+
+
+  <!-- ── LIFECYCLE ── -->
+  <div class="section" id="lifecycle">
+    <div class="section-header">
+      <div class="icon">🔄</div>
+      <div>
+        <h2>A Trade's Full Life Story</h2>
+        <div class="sub">From first data point to final close</div>
+      </div>
+    </div>
+
+    <p>Here's the complete journey of a single trade — from raw market data to closed position — as a story:</p>
+
+    <div class="timeline">
+      <div class="titem">
+        <div class="tlabel">🌅 8:50 AM — Market data arrives</div>
+        <p>oa2 downloads overnight price data, options chain snapshots, news headlines, and social sentiment for all 22 tickers. Data is validated — any source that looks stale or incomplete is flagged.</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">🌤️ 9:00 AM — Regime is classified</div>
+        <p>VIX level, implied vol rank, trend momentum, and cross-asset signals (TLT, GLD, DXY) are fed into the regime classifier. Today's environment is tagged as, say, "VOL_EXPANSION + TRENDING" — bucket #6 of 8. The session clock says we're in the MORNING window (9:30–12:00).</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">🔍 9:15 AM — Context agents check in</div>
+        <p>The Dealer agent computes SPY's Gamma Exposure — big banks are net long gamma, meaning they'll dampen any big moves. The Event Risk agent confirms no earnings in the next 48 hours for any ticker we're watching. The Execution Quality agent confirms spreads are normal.</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">🗣️ 9:30 AM — The 6 experts debate SPY</div>
+        <p>Each debater independently examines their data slice: Directional sees price above all moving averages (BULLISH ×0.75). Income sees IV Rank at 72% — excellent premium-selling conditions (BULLISH ×0.65). Volatility sees VIX term structure inverted — near-term fear elevated (NEUTRAL). Flow sees a large call sweep on SPY at open (BULLISH ×0.60). Sentiment sees Reddit slightly bearish (BEARISH ×0.40). Dealer sees negative GEX below gamma flip (BULLISH ×0.70).</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">⚖️ 9:32 AM — Votes are counted (properly)</div>
+        <p>The consensus engine notes that Directional and Dealer tend to agree with each other often — they share correlation. Their combined vote is down-weighted. After all adjustments, the final result: BULLISH, consensus score 0.66, p_bull = 0.72 (72% probability the bullish trade is right). N_eff = 3.8 effective independent opinions out of 6.</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">🎯 9:33 AM — Sizing checks begin</div>
+        <p><strong>Kelly gate:</strong> With 72% edge and a 2:1 payout spread (risk $100 to make $200), ¼-Kelly says trade 4 contracts. <strong>Book gate:</strong> Current portfolio has moderate delta exposure; adding 4 contracts keeps net delta within the 30% cap. All Greek limits pass. <strong>CVaR gate:</strong> The worst stress scenario (SPY -5% intraday) would cost $280 on 4 contracts — well within the 5% account limit. All three gates: GREEN.</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">📋 9:34 AM — Exit rules assigned at birth</div>
+        <p>Before the order is even placed, the exit engine assigns: stop loss at $400 (full max loss), profit target at $200 (50% of max profit), DTE emergency at 2 days, time stop at 21 days, unique trade ID "a3f7-...". These are locked in and cannot be changed later.</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">📨 9:35 AM — Order placed via moomoo</div>
+        <p>4 contracts of SPY bull call spread (buy 580 call / sell 590 call, 21 DTE) at the mid-price. Order confirmed. The trade is now in the position monitor.</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">👁️ Every 5 minutes — Position monitored</div>
+        <p>The exit engine checks the P&L, current DTE, and current regime on every open position every 5 minutes during market hours. Most checks return "all fine, hold." The position is tracked alongside every other open trade.</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">✅ Day 11 — Profit target hit</div>
+        <p>SPY has rallied. The 580/590 call spread is now worth $197 — crossing the $200 profit target (50% of max). Exit rule fires: profit target reached. Close order sent to moomoo. Trade closed. P&L recorded. The bandit is updated: +1 win for Directional in VOL_EXPANSION + TRENDING regime, +1 win for Flow, +1 win for Dealer, etc.</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">📚 Day 11 — The system learns</div>
+        <p>Each debater's Beta posterior is updated based on whether they were right in this regime. The consensus engine's EWMA correlation matrix is updated with today's opinion set. The system is incrementally smarter for next time.</p>
+      </div>
+    </div>
+
+    <div class="flow">
+      <div class="flow-box highlight">Raw market data (L0)</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">Regime: VOL_EXPANSION + TRENDING (L1)</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">Context: no earnings, normal spreads, dealer long gamma (L2)</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">6 experts debate independently (L4)</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">Consensus: BULLISH p_bull=0.72, N_eff=3.8 (L5)</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">Kelly ✅  Greeks budget ✅  CVaR ✅ → 4 contracts (L6)</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">Portfolio balanced: delta, vega, theta all within limits (L7)</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box green">Trade placed + exit rules assigned (L8)</div>
+    </div>
+  </div>
+
+
+  <!-- ── PHASES ── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="icon">🗓️</div>
+      <div>
+        <h2>How the System Was Built</h2>
+        <div class="sub">The development phases, in plain English</div>
+      </div>
+    </div>
+
+    <p>oa2 was built in carefully ordered phases. Each phase had to pass tests before the next could begin. This prevented building an impressive-looking system on a shaky foundation.</p>
+
+    <table>
+      <tr><th>Phase</th><th>What was built</th><th>Why this order</th></tr>
+      <tr><td>0 — Foundation</td><td>22 tickers defined, data pipelines connected, smoke test passing</td><td>Like pouring concrete before framing walls</td></tr>
+      <tr><td>1 — Debaters</td><td>5 independent expert modules, JSONL opinion logging</td><td>Need opinions before you can aggregate them</td></tr>
+      <tr><td>2 — Regime</td><td>8-bucket market weather classifier</td><td>Need to know the conditions before deciding which expert to trust</td></tr>
+      <tr><td>3 — Consensus</td><td>GLS aggregation engine</td><td>Opinions are useless without a principled way to combine them</td></tr>
+      <tr><td>4 — Bandit</td><td>Thompson sampling learning engine (48 track records)</td><td>Now that opinions are logged, we can start learning from outcomes</td></tr>
+      <tr><td>5 — Dealer</td><td>6th debater: GEX / gamma flip / call-put walls / max pain</td><td>Added after the system was stable — institutional positioning is a late signal</td></tr>
+      <tr><td>A — Signal integrity</td><td>Honest abstention, EWMA correlations, bandit warm-start</td><td>Fix garbage-in before anything real runs</td></tr>
+      <tr><td>B — Sizing engine</td><td>Kelly + Greeks caps + CVaR — the hard gate before any trade</td><td>Required before paper trading. No sizing = no risk control.</td></tr>
+      <tr><td>C — Exit engine</td><td>Position monitor + 6 exit rules + roll logic</td><td>Required for unattended trading. Without exits, losers run forever.</td></tr>
+      <tr><td>D — Regime enhancement</td><td>Intraday session overlay, leading crisis signal, cross-asset inputs</td><td>Better regime = better expert weighting = better decisions</td></tr>
+      <tr><td>E — Real flow data</td><td>5 pluggable data source adapters (yfinance, moomoo, Tradier, Unusual Whales, OptionsWhale)</td><td>The flow debater needs real tape data to be honest</td></tr>
+      <tr><td>F — Backtesting</td><td>6-month historical replay, A/B vs prior system, Sharpe comparison</td><td>Before going live, prove the system is actually better than what it's replacing</td></tr>
+    </table>
+
+    <div class="callout">
+      <strong>Current status:</strong> All phases complete. 456 automated tests passing. The system is in <em>supervised paper trading</em> mode — all signals and trades are generated and logged, but a human reviews each trade. The next step (fully unsupervised) requires 2 weeks of operation with no rule violations.
+    </div>
+  </div>
+
+
+  <!-- ── GLOSSARY ── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="icon">📖</div>
+      <div>
+        <h2>Quick Glossary</h2>
+        <div class="sub">Every term used in this guide, in one place</div>
+      </div>
+    </div>
+
+    <table>
+      <tr><th>Term</th><th>One-sentence plain English</th></tr>
+      <tr><td>CVaR</td><td>Conditional Value at Risk — "what is my average loss in the worst 5% of scenarios?"</td></tr>
+      <tr><td>Debater</td><td>An independent expert module that votes on market direction using one type of data</td></tr>
+      <tr><td>DTE</td><td>Days to Expiration — how long until the options contract expires</td></tr>
+      <tr><td>EWMA</td><td>Exponentially Weighted Moving Average — a running average that cares more about recent data</td></tr>
+      <tr><td>Feature flag</td><td>An on/off switch for each system component — lets you run parts in "shadow mode" before enabling them</td></tr>
+      <tr><td>GEX</td><td>Gamma Exposure — a measure of how much market makers must hedge, which affects price dynamics</td></tr>
+      <tr><td>GLS</td><td>Generalised Least Squares — a mathematically correct way to average opinions that accounts for how correlated they are</td></tr>
+      <tr><td>IV Rank</td><td>How expensive options are right now compared to their historical range (0 = cheapest ever, 1 = most expensive ever)</td></tr>
+      <tr><td>Kelly</td><td>A formula from information theory that calculates the optimal fraction of your account to bet given your edge</td></tr>
+      <tr><td>N_eff</td><td>Effective sample size — how many truly independent opinions the 6 debaters represent (always ≤ 6)</td></tr>
+      <tr><td>p_bull</td><td>Probability of bullish — the consensus engine's calibrated confidence that the bullish trade is correct</td></tr>
+      <tr><td>Precision matrix</td><td>The inverse of the correlation matrix — used to calculate how much to trust each debater</td></tr>
+      <tr><td>Regime</td><td>The current market "weather" — one of 8 buckets based on volatility and trend direction</td></tr>
+      <tr><td>Roll</td><td>Closing a profitable short-premium trade early and immediately re-opening the same trade at a later expiration date</td></tr>
+      <tr><td>Shadow mode</td><td>Running a component so it generates output that gets logged but does NOT affect actual trading — testing without risk</td></tr>
+      <tr><td>Theta</td><td>Daily time decay — how much value an option loses just by one more day passing</td></tr>
+      <tr><td>Thompson sampling</td><td>A statistical algorithm for learning which of N options is best by intelligently exploring vs. exploiting what you know</td></tr>
+      <tr><td>Vega</td><td>Sensitivity to volatility — how much an option's value changes when implied volatility moves 1%</td></tr>
+    </table>
+  </div>
+
+  <footer>
+    <p>oa2 — OptionsAgents v2 &nbsp;|&nbsp; Plain English Explainer &nbsp;|&nbsp; All phases A–F complete &nbsp;|&nbsp; 456 tests passing</p>
+    <p style="margin-top:4px;">Generated from source — not a financial prospectus. For educational purposes only.</p>
+  </footer>
+
+</div>
+</body>
+</html>
