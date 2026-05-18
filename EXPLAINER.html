@@ -258,6 +258,7 @@
   <a href="#regime">Weather</a>
   <a href="#debaters">Experts</a>
   <a href="#consensus">Voting</a>
+  <a href="#calibration">Calibration</a>
   <a href="#sizing">How Much</a>
   <a href="#exit">When to Sell</a>
   <a href="#learning">Learning</a>
@@ -294,11 +295,12 @@
     </div>
 
     <div class="chips">
-      <span class="chip green">✅ 456 automated tests</span>
+      <span class="chip green">✅ 471 automated tests</span>
       <span class="chip green">✅ 22 stocks watched</span>
       <span class="chip green">✅ 6 expert "debaters"</span>
-      <span class="chip green">✅ 3 safety gates before every trade</span>
-      <span class="chip blue">📍 Ready for supervised paper trading</span>
+      <span class="chip green">✅ 4 safety gates before every trade</span>
+      <span class="chip green">✅ Calibrated p_bull (Platt scaling)</span>
+      <span class="chip blue">📍 Shadow-trading ready — live capital not yet</span>
     </div>
   </div>
 
@@ -401,8 +403,8 @@
         <span class="num">L6</span>
         <div>
           <div class="title">Sizing Engine — How many contracts to buy</div>
-          <div class="desc">Three consecutive safety checks determine exactly how many contracts to trade: Kelly formula (edge-based), Greeks budget (whole-portfolio balance), and CVaR stress test (worst-case scenario check).</div>
-          <div class="plain">Like a casino asking: given your edge, your current table exposure, and what happens if there's an earthquake — how many chips should you bet?</div>
+          <div class="desc">Four consecutive safety checks determine exactly how many contracts to trade: Kelly formula (edge-based), Greeks budget (whole-portfolio balance), scenario stress (coarse pre-check), and Monte Carlo CVaR (10,000-path tail-risk simulation).</div>
+          <div class="plain">Like a casino asking: given your edge, your current table exposure, what happens in a few obvious nightmare scenarios, AND what the average loss looks like across ten thousand simulated bad days — how many chips should you bet?</div>
         </div>
       </div>
       <div class="layer">
@@ -521,25 +523,34 @@
       </div>
     </div>
 
-    <p>Before any vote is taken, <strong>6 independent expert modules</strong> each examine the market data through their own specialised lens and return a verdict: <em>Bullish</em> (expect stock to rise), <em>Bearish</em> (expect it to fall), or <em>Neutral</em> (not enough evidence). Each verdict comes with a confidence score from 0.0 (no idea) to 1.0 (very confident).</p>
+    <p>Before any vote is taken, <strong>6 independent expert modules</strong> each examine the market data through their own specialised lens. Each expert returns up to <em>two</em> separate verdicts:</p>
 
-    <p>Crucially, each expert is <strong>not allowed to see the others' verdicts</strong> before forming their own. This prevents herd thinking — if one expert is confidently wrong, the others won't blindly follow.</p>
+    <ul style="margin: 0 0 1rem 1.5rem; color:#374151;">
+      <li><strong>Direction</strong> — Bullish / Bearish / Neutral view on the <em>underlying stock price</em>.</li>
+      <li><strong>Trade quality</strong> — Approve / Reject / Abstain on the <em>proposed structure</em> (e.g., is now a good time to <em>sell</em> premium?).</li>
+    </ul>
+
+    <p>This split is important: a debater can think "selling premium here is ideal" without claiming the underlying will rise. Those are different statements. Conflating them inflates the directional signal with what are really trade-quality votes.</p>
+
+    <p>Each verdict comes with a confidence score from 0.0 (no idea) to 1.0 (very confident). Each expert is <strong>not allowed to see the others' verdicts</strong> before forming their own. This prevents herd thinking — if one expert is confidently wrong, the others won't blindly follow.</p>
 
     <div class="debaters">
       <div class="debater">
-        <div class="dtitle">📈 Directional</div>
+        <div class="dtitle">📈 Directional <span style="font-size:0.7rem;color:#10b981;">(direction)</span></div>
         <div class="dq">Question: which way is price moving?</div>
         <div class="drw">Looks at: price vs moving averages, momentum, breakouts. <br><em>Like a track coach who watches if the runner is accelerating or slowing down.</em></div>
       </div>
       <div class="debater">
-        <div class="dtitle">💰 Income</div>
+        <div class="dtitle">💰 Income <span style="font-size:0.7rem;color:#3b82f6;">(trade quality)</span></div>
         <div class="dq">Question: is this a good time to sell premium?</div>
         <div class="drw">Looks at: how expensive options are (IV rank), skew, term structure. <br><em>Like an insurance salesperson checking if premiums are high enough to justify the risk.</em></div>
+        <div style="font-size:0.8rem;color:#3b82f6;margin-top:6px;">📌 Votes only on trade quality (Approve/Reject) — emits Neutral on direction.</div>
       </div>
       <div class="debater">
-        <div class="dtitle">🌊 Volatility</div>
-        <div class="dq">Question: is vol going up or down?</div>
-        <div class="drw">Looks at: VIX, vol-of-vol (VVIX), term structure shape. <br><em>Like a meteorologist who specialises in storm forecasting — not where you'll go, but how rough the ride will be.</em></div>
+        <div class="dtitle">🌊 Volatility <span style="font-size:0.7rem;color:#3b82f6;">(trade quality)</span></div>
+        <div class="dq">Question: is vega exposure aligned with the vol regime?</div>
+        <div class="drw">Looks at: VIX, vol-of-vol (VVIX), term structure shape. <br><em>Like a meteorologist who tells you whether to bring a raincoat — not which direction to walk.</em></div>
+        <div style="font-size:0.8rem;color:#3b82f6;margin-top:6px;">📌 Votes only on trade quality (Approve/Reject) — emits Neutral on direction.</div>
       </div>
       <div class="debater">
         <div class="dtitle">🐋 Flow</div>
@@ -595,16 +606,49 @@
     </div>
 
     <h3>Example vote in action</h3>
-    <p>Here's what a typical vote might look like for SPY on a bullish trending day:</p>
+    <p>Here's what a typical vote might look like for SPY on a bullish trending day. Note: Income and Volatility don't have a directional view — their votes show up under trade quality below.</p>
 
+    <p style="font-weight:600;font-size:0.92rem;color:#0f3460;margin:0.5rem 0 0.25rem;">Direction channel (which way is price going?)</p>
     <div class="vote-row"><span class="vote-name">Directional</span><div class="vote-bar-wrap"><div class="vote-bar bull" style="width:75%"></div></div><span class="vote-label">BULLISH ×0.75</span></div>
-    <div class="vote-row"><span class="vote-name">Income</span><div class="vote-bar-wrap"><div class="vote-bar bull" style="width:65%"></div></div><span class="vote-label">BULLISH ×0.65</span></div>
-    <div class="vote-row"><span class="vote-name">Volatility</span><div class="vote-bar-wrap"><div class="vote-bar neu" style="width:50%"></div></div><span class="vote-label">NEUTRAL ×0.50</span></div>
     <div class="vote-row"><span class="vote-name">Flow</span><div class="vote-bar-wrap"><div class="vote-bar bull" style="width:60%"></div></div><span class="vote-label">BULLISH ×0.60</span></div>
     <div class="vote-row"><span class="vote-name">Sentiment</span><div class="vote-bar-wrap"><div class="vote-bar bear" style="width:40%"></div></div><span class="vote-label">BEARISH ×0.40</span></div>
     <div class="vote-row"><span class="vote-name">Dealer</span><div class="vote-bar-wrap"><div class="vote-bar bull" style="width:70%"></div></div><span class="vote-label">BULLISH ×0.70</span></div>
 
-    <p style="margin-top:1rem;">After correlation-aware weighting, the consensus comes out <strong>BULLISH with p_bull ≈ 0.72</strong> — meaning the system believes there's roughly a 72% probability that the bullish trade is right. That number feeds directly into the next step: how much to bet.</p>
+    <p style="font-weight:600;font-size:0.92rem;color:#0f3460;margin:1rem 0 0.25rem;">Trade-quality channel (is the proposed structure a good fit?)</p>
+    <div class="vote-row"><span class="vote-name">Income</span><div class="vote-bar-wrap"><div class="vote-bar bull" style="width:65%"></div></div><span class="vote-label">APPROVE ×0.65</span></div>
+    <div class="vote-row"><span class="vote-name">Volatility</span><div class="vote-bar-wrap"><div class="vote-bar neu" style="width:35%"></div></div><span class="vote-label">ABSTAIN ×0.35</span></div>
+
+    <p style="margin-top:1rem;">After correlation-aware weighting on the direction channel, the consensus comes out <strong>BULLISH with raw p_bull ≈ 0.72</strong>. That raw number then goes through the <strong>calibrator</strong> (see next section) which corrects it against historical accuracy. The calibrated probability is what feeds into Kelly sizing.</p>
+  </div>
+
+
+  <!-- ── CALIBRATION ── -->
+  <div class="section" id="calibration">
+    <div class="section-header">
+      <div class="icon">🎚️</div>
+      <div>
+        <h2>Calibrating the Probability</h2>
+        <div class="sub">Turning a raw confidence number into a trustworthy probability</div>
+      </div>
+    </div>
+
+    <p>The consensus engine produces a number it calls <code>p_bull</code> — a rough probability that the bullish trade is right. But raw model outputs are usually <em>miscalibrated</em>: a model that says "70% confident" is often actually right closer to 55–60% of the time. Feeding a miscalibrated probability into Kelly is the textbook way to over-bet.</p>
+
+    <p>The <strong>calibrator</strong> fixes this. It learns a monotone correction from historical (predicted probability, actual outcome) pairs and applies it to every new prediction.</p>
+
+    <div class="analogy">
+      Think of a weather forecaster who has been saying "70% chance of rain" for years. Someone keeps a tally — and discovers that on "70% rain" days, it actually rained only 55% of the time. The calibrator is the editor who quietly adjusts every future "70%" forecast down to "55%" so the published number matches reality. Same forecaster, same data — just corrected for systematic overconfidence.
+    </div>
+
+    <h3>How it works</h3>
+    <p>oa2 uses <strong>Platt scaling</strong> by default: a logistic-regression fit (<code>p_cal = sigmoid(a × p_raw + b)</code>) trained on the backtest history. When fewer than 50 historical samples exist, the calibrator runs in <strong>identity mode</strong> — it returns the raw probability unchanged, because there's not enough data to correct anything yet.</p>
+
+    <h3>What our current calibrator says</h3>
+    <p>Fitted on the latest 218-sample backtest, the Platt slope <code>a = 0.10</code> is very close to zero. Translation: <strong>the raw <code>p_bull</code> from the current consensus engine is barely informative.</strong> The calibrator essentially flattens every raw input toward ~52%, which is just above the Kelly minimum-edge threshold of 52%. The Brier score improved from 0.335 → 0.249 — meaningful, but the corrected probability rarely says anything strongly enough to trigger a trade.</p>
+
+    <div class="callout red">
+      <strong>This is honest news, not bad news.</strong> The calibrator is doing its job: telling us our directional signal isn't yet strong enough to trade aggressively. As the bandit, EWMA correlations, and live data improve consensus quality over time, the calibrator will be refitted and its slope will rise — at which point Kelly will start approving trades again. Until then, the system errs heavily on the side of <em>not trading.</em>
+    </div>
   </div>
 
 
@@ -618,14 +662,14 @@
       </div>
     </div>
 
-    <p>Having a correct direction is only half the battle. Betting too much on a correct trade can still wipe you out if the timing is off. Betting too little wastes the opportunity. The sizing engine runs <strong>three consecutive checks</strong> — a trade only gets approved if it passes all three.</p>
+    <p>Having a correct direction is only half the battle. Betting too much on a correct trade can still wipe you out if the timing is off. Betting too little wastes the opportunity. The sizing engine runs <strong>four consecutive checks</strong> — a trade only gets approved if it passes all four.</p>
 
     <div class="gates">
       <div class="gate g1">
         <span class="gnum">①</span>
         <div>
           <div class="gtitle">Kelly Formula — "How much does your edge say to bet?"</div>
-          <div class="gdesc">Uses the consensus probability (e.g., 72%) and the trade's payout ratio (max profit vs max loss) to calculate the mathematically optimal bet size. Uses ¼-Kelly (25% of the formula) to stay conservative. Adjusts down further if the trade is close to expiration.</div>
+          <div class="gdesc">Uses the <em>calibrated</em> consensus probability and the trade's payout ratio (max profit vs max loss) to calculate the mathematically optimal bet size. Uses ¼-Kelly (25% of the formula) to stay conservative. Adjusts down further if the trade is close to expiration. Requires the edge to clear a 52% minimum threshold — below that, the trade is rejected.</div>
         </div>
       </div>
       <div class="gate g2">
@@ -638,14 +682,21 @@
       <div class="gate g3">
         <span class="gnum">③</span>
         <div>
-          <div class="gtitle">CVaR Stress Test — "What's the worst realistic case?"</div>
-          <div class="gdesc">Runs 5 nightmare scenarios before approving: stock drops 3%, stock drops 5%, VIX spikes +10, VIX spikes +20 (crisis), and every position moves against you at once. If any scenario would lose more than 5% of the account, the size is cut until it fits — or the trade is rejected entirely.</div>
+          <div class="gtitle">Scenario Stress (pre-check) — "Any obvious nightmare break this?"</div>
+          <div class="gdesc">A fast, deterministic check against 5 named scenarios: underlying −3%, underlying −5%, VIX +10, VIX +20, and a simultaneous-adverse-move scenario across the whole book. Designed to catch gross mistakes quickly. Cheap, but coarse — it only uses delta and vega, no gamma, no smile. The real risk check happens at gate ④.</div>
+        </div>
+      </div>
+      <div class="gate g3">
+        <span class="gnum">④</span>
+        <div>
+          <div class="gtitle">Monte Carlo CVaR — "What's the average loss in the worst 5% of scenarios?"</div>
+          <div class="gdesc">The gate of record for tail risk. Simulates <strong>10,000 paths</strong> of joint (underlying return, IV change) using fat-tailed Student-t draws and a realistic negative correlation between returns and vol shocks. Reprices the proposed trade on every path (Black-Scholes when leg data is available, second-order Taylor otherwise) and averages the loss across the worst 5% of outcomes. If that average loss exceeds 5% of the account, the size is reduced or the trade is rejected.</div>
         </div>
       </div>
     </div>
 
     <div class="analogy">
-      Think of a pilot's pre-flight checklist. Gate ① is "do we have enough fuel for the trip?" Gate ② is "is the weight distribution safe?" Gate ③ is "what happens if we hit severe turbulence or lose an engine?" Every gate must be cleared before wheels-up. No single opinion can override all three checks.
+      Think of a pilot's pre-flight checklist. Gate ① is "do we have enough fuel for the trip?" Gate ② is "is the weight distribution safe?" Gate ③ is "do any of the obvious failure scenarios crash the plane?" Gate ④ is "if we ran ten thousand simulated bad-weather flights, what does the average disaster look like?" Every gate must be cleared before wheels-up. No single opinion can override the four checks.
     </div>
 
     <h3>DTE-aware sizing</h3>
@@ -749,7 +800,8 @@
       <tr><td>Market enters crisis mode suddenly</td><td>A leading crisis signal (VIX term structure, vol-of-vol) fires <em>before</em> VIX hits 35 — the system starts reducing size early</td></tr>
       <tr><td>Sizing engine rejects every trade (too conservative)</td><td>Kelly fraction, caps, and CVaR thresholds are calibrated against backtest data to balance safety with activity</td></tr>
       <tr><td>Position held too long, market conditions change</td><td>Regime-flip exit rule fires within the same trading session the conditions change</td></tr>
-      <tr><td>moomoo broker unavailable</td><td>Data falls back to yfinance automatically; trade execution pauses until broker reconnects</td></tr>
+      <tr><td>Backtest replaying a historical date</td><td>The data cache refuses to use moomoo's live-quote endpoint for any date that isn't today, and routes through yfinance with the requested historical date instead — backtests cannot leak live prices</td></tr>
+      <tr><td>moomoo broker unavailable</td><td>Trade execution pauses; data fetch for the current day attempts moomoo first, falls through to yfinance if moomoo is offline</td></tr>
       <tr><td>Bandit has no history (cold start)</td><td>Pre-loaded with 6 months of historical replay before first live use</td></tr>
       <tr><td>Correlation matrix is singular (can't be inverted)</td><td>Ridge regularisation (tiny constant added to diagonal) ensures the matrix always inverts safely</td></tr>
     </table>
@@ -787,15 +839,20 @@
       </div>
       <div class="titem">
         <div class="tlabel">🗣️ 9:30 AM — The 6 experts debate SPY</div>
-        <p>Each debater independently examines their data slice: Directional sees price above all moving averages (BULLISH ×0.75). Income sees IV Rank at 72% — excellent premium-selling conditions (BULLISH ×0.65). Volatility sees VIX term structure inverted — near-term fear elevated (NEUTRAL). Flow sees a large call sweep on SPY at open (BULLISH ×0.60). Sentiment sees Reddit slightly bearish (BEARISH ×0.40). Dealer sees negative GEX below gamma flip (BULLISH ×0.70).</p>
+        <p><em>Direction channel:</em> Directional sees price above all moving averages (BULLISH ×0.75). Flow sees a large call sweep on SPY at open (BULLISH ×0.60). Sentiment sees Reddit slightly bearish (BEARISH ×0.40). Dealer sees negative GEX below gamma flip (BULLISH ×0.70).<br>
+        <em>Trade-quality channel:</em> Income sees IV Rank at 72% — excellent premium-selling conditions (APPROVE ×0.65). Volatility sees VIX term structure inverted; vega-sign on this structure is ambiguous (ABSTAIN ×0.35).</p>
       </div>
       <div class="titem">
         <div class="tlabel">⚖️ 9:32 AM — Votes are counted (properly)</div>
-        <p>The consensus engine notes that Directional and Dealer tend to agree with each other often — they share correlation. Their combined vote is down-weighted. After all adjustments, the final result: BULLISH, consensus score 0.66, p_bull = 0.72 (72% probability the bullish trade is right). N_eff = 3.8 effective independent opinions out of 6.</p>
+        <p>The consensus engine aggregates only the direction channel for the directional verdict. It notes that Directional and Dealer tend to agree with each other often — they share correlation. Their combined vote is down-weighted. After all adjustments, the final result: BULLISH, raw <code>p_bull</code> = 0.72.</p>
+      </div>
+      <div class="titem">
+        <div class="tlabel">🎚️ 9:32 AM — Calibrator corrects the probability</div>
+        <p>The Platt calibrator (fit on 218 historical samples) maps raw 0.72 → calibrated 0.55. The raw signal was overconfident; the corrected probability is what Kelly will actually see.</p>
       </div>
       <div class="titem">
         <div class="tlabel">🎯 9:33 AM — Sizing checks begin</div>
-        <p><strong>Kelly gate:</strong> With 72% edge and a 2:1 payout spread (risk $100 to make $200), ¼-Kelly says trade 4 contracts. <strong>Book gate:</strong> Current portfolio has moderate delta exposure; adding 4 contracts keeps net delta within the 30% cap. All Greek limits pass. <strong>CVaR gate:</strong> The worst stress scenario (SPY -5% intraday) would cost $280 on 4 contracts — well within the 5% account limit. All three gates: GREEN.</p>
+        <p><strong>Kelly gate ①:</strong> 55% edge clears the 52% minimum; with a 2:1 payout spread, ¼-Kelly says trade 1 contract. <strong>Greeks gate ②:</strong> Current portfolio has moderate delta exposure; adding 1 contract keeps net delta within the 30% cap. All Greek limits pass. <strong>Scenario stress gate ③:</strong> No named scenario breaches 5% of account. <strong>MC CVaR gate ④:</strong> Across 10,000 simulated paths, the average loss in the worst 5% of outcomes is −$180 — well within the $2,500 (5% of $50k) budget. All four gates: GREEN.</p>
       </div>
       <div class="titem">
         <div class="tlabel">📋 9:34 AM — Exit rules assigned at birth</div>
@@ -830,7 +887,9 @@
       <div class="flow-arrow">↓</div>
       <div class="flow-box">Consensus: BULLISH p_bull=0.72, N_eff=3.8 (L5)</div>
       <div class="flow-arrow">↓</div>
-      <div class="flow-box">Kelly ✅  Greeks budget ✅  CVaR ✅ → 4 contracts (L6)</div>
+      <div class="flow-box">Calibrator: raw p=0.72 → cal p=0.55</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">Kelly ✅ Greeks ✅ Scenario ✅ MC CVaR ✅ → 1 contract (L6)</div>
       <div class="flow-arrow">↓</div>
       <div class="flow-box">Portfolio balanced: delta, vega, theta all within limits (L7)</div>
       <div class="flow-arrow">↓</div>
@@ -867,8 +926,20 @@
       <tr><td>F — Backtesting</td><td>6-month historical replay, A/B vs prior system, Sharpe comparison</td><td>Before going live, prove the system is actually better than what it's replacing</td></tr>
     </table>
 
-    <div class="callout">
-      <strong>Current status:</strong> All phases complete. 456 automated tests passing. The system is in <em>supervised paper trading</em> mode — all signals and trades are generated and logged, but a human reviews each trade. The next step (fully unsupervised) requires 2 weeks of operation with no rule violations.
+    <h3>Latest backtest readout (honest version)</h3>
+    <p>6-month replay across SPY / QQQ / IWM / DIA — 300 trading days evaluated:</p>
+    <table>
+      <tr><th>Metric</th><th>Value</th><th>Interpretation</th></tr>
+      <tr><td>Consensus direction accuracy (non-NEUTRAL days)</td><td>50.0%</td><td>Essentially random. Directional signal is at noise.</td></tr>
+      <tr><td>v2 Sharpe</td><td>−0.30</td><td>Negative. Not a winning system on this window.</td></tr>
+      <tr><td>v1 baseline Sharpe (EMA crossover)</td><td>−0.89</td><td>Also negative. v2 beats baseline by +0.58 but both lose.</td></tr>
+      <tr><td>Brier score (before calibration)</td><td>0.335</td><td>Worse than always guessing 0.5.</td></tr>
+      <tr><td>Brier score (after Platt calibration, 218 samples)</td><td>0.249</td><td>Now equivalent to always guessing 0.5. Honest.</td></tr>
+      <tr><td>Calibrator Platt slope <code>a</code></td><td>0.10</td><td>Near zero → raw <code>p_bull</code> has weak predictive power on the current configuration.</td></tr>
+    </table>
+
+    <div class="callout red">
+      <strong>Current status — honest:</strong> All infrastructure phases (0–F) and all P0 fixes (multi-leg order state machine, calibrator, MC CVaR, clock-propagation, remark-greeks wiring) are complete. <strong>471 automated tests pass.</strong> However, the directional signal on the current debater configuration is not yet strong enough to trade aggressively. The system is ready for <em>shadow-mode operation</em> (decisions logged, no orders placed) so the bandit and calibrator can accumulate real-data evidence. Live capital is <strong>not</strong> recommended until: (a) the trade-quality channel has a consumer wired into sizing, (b) the calibrator is refit on a larger sample with a meaningfully non-zero slope, and (c) v2 Sharpe exceeds the baseline by a clear margin on a fresh out-of-sample backtest.
     </div>
   </div>
 
@@ -885,7 +956,8 @@
 
     <table>
       <tr><th>Term</th><th>One-sentence plain English</th></tr>
-      <tr><td>CVaR</td><td>Conditional Value at Risk — "what is my average loss in the worst 5% of scenarios?"</td></tr>
+      <tr><td>Calibrator</td><td>The component that corrects raw <code>p_bull</code> against historical accuracy using Platt scaling. Runs in identity mode (no correction) when fewer than 50 historical samples exist.</td></tr>
+      <tr><td>CVaR</td><td>Conditional Value at Risk — "what is my <em>average</em> loss in the worst 5% of scenarios?" In oa2 this is computed by Monte Carlo with 10,000 fat-tailed paths, not by hand-picked scenarios.</td></tr>
       <tr><td>Debater</td><td>An independent expert module that votes on market direction using one type of data</td></tr>
       <tr><td>DTE</td><td>Days to Expiration — how long until the options contract expires</td></tr>
       <tr><td>EWMA</td><td>Exponentially Weighted Moving Average — a running average that cares more about recent data</td></tr>
@@ -895,7 +967,9 @@
       <tr><td>IV Rank</td><td>How expensive options are right now compared to their historical range (0 = cheapest ever, 1 = most expensive ever)</td></tr>
       <tr><td>Kelly</td><td>A formula from information theory that calculates the optimal fraction of your account to bet given your edge</td></tr>
       <tr><td>N_eff</td><td>Effective sample size — how many truly independent opinions the 6 debaters represent (always ≤ 6)</td></tr>
-      <tr><td>p_bull</td><td>Probability of bullish — the consensus engine's calibrated confidence that the bullish trade is correct</td></tr>
+      <tr><td>p_bull</td><td>Probability of bullish — the consensus engine's confidence that the bullish trade is correct. Two flavours: <em>raw</em> p_bull (engine output) and <em>calibrated</em> p_bull (after Platt correction). Kelly sizing always uses the calibrated one.</td></tr>
+      <tr><td>Platt scaling</td><td>A simple two-parameter logistic regression (<code>sigmoid(a·p + b)</code>) used to map miscalibrated raw probabilities to corrected ones.</td></tr>
+      <tr><td>Trade quality</td><td>A second voting channel, separate from direction. Debaters like Income and Volatility vote Approve / Reject / Abstain on the proposed structure without claiming any view on which way the underlying will move.</td></tr>
       <tr><td>Precision matrix</td><td>The inverse of the correlation matrix — used to calculate how much to trust each debater</td></tr>
       <tr><td>Regime</td><td>The current market "weather" — one of 8 buckets based on volatility and trend direction</td></tr>
       <tr><td>Roll</td><td>Closing a profitable short-premium trade early and immediately re-opening the same trade at a later expiration date</td></tr>
@@ -907,7 +981,7 @@
   </div>
 
   <footer>
-    <p>oa2 — OptionsAgents v2 &nbsp;|&nbsp; Plain English Explainer &nbsp;|&nbsp; All phases A–F complete &nbsp;|&nbsp; 456 tests passing</p>
+    <p>oa2 — OptionsAgents v2 &nbsp;|&nbsp; Plain English Explainer &nbsp;|&nbsp; All phases A–F + P0 fixes complete &nbsp;|&nbsp; 471 tests passing &nbsp;|&nbsp; Shadow-mode ready</p>
     <p style="margin-top:4px;">Generated from source — not a financial prospectus. For educational purposes only.</p>
   </footer>
 
