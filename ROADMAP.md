@@ -2,16 +2,16 @@
 
 ## Production Readiness Assessment
 
-As of Phases 1-5: the system is an entry signal generator. It is NOT ready for
-live or paper trading. The following blockers exist:
+All phases A–F complete. System is ready for supervised paper trading.
 
-1. **No sizing engine** — wrong size kills edge even with correct direction
-2. **No exit engine** — options decay; winning trades become losses without automated exits
-3. **Flow debater emits fabricated signals** — PCR derived from chain delta, not real tape [FIXED A1]
-4. **Bandit cold-start** — 48 Beta(1,1) priors need 30-50 trades/arm to be useful [FIXED A2]
-5. **GLS correlations are assumptions** — hardcoded values never validated empirically [FIXED A3]
+**Hard gate status:**
+1. Phase A complete: honest debaters, live EWMA correlation, warm bandit posteriors
+2. Phase B complete: sizing engine — Kelly + Greeks caps + CVaR pass before every trade
+3. Phase C complete: exit engine running on all open positions
+4. Phase F complete: v2 Sharpe >= v1 baseline on 90-day backtest window
 
-**Paper trading gate:** Phase A + Phase B + Phase C complete, Phase F shows v2 Sharpe >= v1.
+**Remaining gate:** 2 weeks of shadow mode with no sizing/exit rule breaches before
+enabling unsupervised paper trading.
 
 ---
 
@@ -40,7 +40,7 @@ Feature flag: `OA2_FLAG_EWMA_CORR` (default on).
 
 ---
 
-## Phase B — Sizing Engine (oa2/sizing/) [CURRENT SPRINT]
+## Phase B — Sizing Engine (oa2/sizing/) [COMPLETE]
 
 Gate: required before any paper or live trading begins. No trade executes without sizing.
 
@@ -98,7 +98,7 @@ Short positions approaching DTE < 2: mandatory size reduction and exit evaluatio
 
 ---
 
-## Phase C — Exit Engine (oa2/execution/)
+## Phase C — Exit Engine (oa2/execution/) [COMPLETE]
 
 Gate: required for unattended paper trading. Without exits, every open position
 is a risk that grows over time.
@@ -136,7 +136,7 @@ evaluate rolling to the next expiration vs closing. Roll if:
 
 ---
 
-## Phase D — Regime Enhancement
+## Phase D — Regime Enhancement [COMPLETE]
 
 Goal: improve the quality of regime classification and add missing intraday context.
 

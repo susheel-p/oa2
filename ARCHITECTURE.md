@@ -4,9 +4,9 @@
 
 ```
 L0  MARKET DATA & FEATURE FABRIC          (dataflows/)
-L1  REGIME DETECTION SERVICE              (regime/)         — 8-bucket vol × trend
+L1  REGIME DETECTION SERVICE              (regime/)         — 8-bucket vol × trend + session overlay
 L2  CONTEXT AGENTS (read-only, no LLM)    (context_agents/)
-      • Dealer Positioning  (SPY/QQQ/IWM)
+      • Dealer Positioning  (SPY/QQQ/IWM) — GEX, gamma flip, call/put walls, max pain
       • Macro Regime
       • Event Risk           (earnings blackout, CPI/FOMC)
       • Execution Quality    (spread, depth, fill prob)
@@ -16,11 +16,11 @@ L4  DEBATER ENSEMBLE                      (debaters/)
 L5  CONSENSUS ENGINE                      (consensus/)
       GLS aggregator + EWMA covariance + isotonic calibration
 L6  POSITION SIZING ENGINE                (sizing/)
-      Fractional Kelly · vol-target · CVaR cap · greeks budget
+      Fractional Kelly · DTE-aware scaling · CVaR cap · Greeks budget
 L7  PORTFOLIO ORCHESTRATOR                (portfolio/)
       Book-level Δ/Γ/Θ/Vega limits · correlation matrix
 L8  EXECUTION & LEARNING                  (execution/, learning/)
-      moomoo executor · trade journal · regime-indexed bandit
+      moomoo executor · exit engine · trade journal · regime-indexed bandit
 ```
 
 ## Trade universe (locked, v2 launch)
@@ -45,130 +45,128 @@ Macro ETFs (TLT, GLD, USO) serve double duty: tradeable + cross-asset regime inp
 6. **Shadow-mode first** for every new component. Cutover only after parity demonstrated.
 7. **Debaters must abstain honestly.** A debater with no real data returns conviction=0.0, not a fabricated estimate.
 8. **Bandit warm-started from backtest.** Cold Beta(1,1) priors are useless for 6-12 months; historical replay populates posteriors before live trading.
+9. **Sizing is a hard gate.** No trade executes without passing Kelly + Greeks caps + CVaR checks.
+10. **Exit logic is mandatory.** Every approved trade gets exit conditions assigned at approval time.
 
-## Regime taxonomy (v1 — 8 buckets)
+## Regime taxonomy (8 buckets)
 
 ```
 regime_id = (vol_state, trend_state)
-vol_state   ∈ {VOL_COMP, NORMAL, VOL_EXP, CRISIS}  (from existing VolRegime)
+vol_state   ∈ {VOL_COMP, NORMAL, VOL_EXP, CRISIS}  (from VolRegime)
 trend_state ∈ {TREND, MEAN_REVERT, NEUTRAL}         (20d return classifier)
 ```
 
-### Regime Classifier Known Gaps (tracked, fix in Phase D)
+Regime thresholds:
+- `VOL_COMPRESSION`: iv_rank < 0.35 — premium cheap, directional plays preferred
+- `NORMAL`: iv_rank 0.35–0.65 — standard regime
+- `VOL_EXPANSION`: iv_rank > 0.65 — premium selling window
+- `CRISIS`: rv_iv_ratio > 1.20 OR vix > 35 — overrides vol state; reduces size
+- Leading crisis signal: VIX3M/VIX < 1.05 AND VVIX > 110 → early CRISIS flag
 
-- Crisis detection is backward-looking (VIX > 35). Leading signals needed: VIX3M/VIX ratio < 1.05 + VVIX > 110.
-- 20-day slope is too slow for intraday regime. Session-state overlay needed (OPEN/MORNING/MIDDAY/POWER_HOUR).
-- No cross-asset macro signals: TLT crash + DXY spike (risk-off), HYG/JNK spread widening (credit stress).
-- Upgrade path: replace with HMM + BOCPD once ≥500 resolved trades exist.
+Session overlay (D1): OPEN / MORNING / MIDDAY / AFTERNOON / POWER_HOUR adjusts
+debater weights intraday — flow and GEX matter more at open; theta harvest in midday.
 
-## Consensus Engine Known Gaps (tracked, fix in Phase A)
+## Consensus engine
 
-- Correlation matrix is hardcoded (fixed pairs, not learned). Replace with EWMA over resolved trades.
-- GLS correctness depends on accurate correlation estimates. Wrong correlations amplify duplicated signals.
-- Fixed correlations were never empirically validated; they were initial assumptions.
+GLS aggregation with EWMA live covariance (λ=0.94, min 20 observations):
+- Opinion vectorization: BULLISH×conv → +conv, BEARISH×conv → -conv, NEUTRAL → 0
+- Precision matrix inverted from EWMA correlation tracker
+- Effective sample size N_eff = (Σw)² / Σw² — reduced by correlated opinions
+- p_bull = sigmoid(score × N_eff × 2.0) — calibrated probability for Kelly sizing
 
-## Debater Known Gaps (tracked, fix in Phase A + E)
+When EWMA tracker is cold (< 20 observations), falls back to `_fixed_correlation()`.
+Feature flag: `OA2_FLAG_EWMA_CORR` (default on).
 
-### Flow Debater (highest priority)
-- Currently derives PCR from chain delta field — this is a proxy of a proxy.
-- Dark pool flags (dark_pool_bullish/bearish) are never populated from real data.
-- Must return conviction=0.0 + NEUTRAL when no real sweep/flow data is available.
-- Real data source needed: Unusual Whales API or Tradier streaming tape.
+## Sizing engine (Phase B)
 
-### Bandit Cold-Start Problem
-- 48 Beta(1,1) priors require 30-50 resolved trades per arm to diverge.
-- At 2-3 paper trades/day, adaptive weighting is dormant for 6-12 months.
-- Fix: warm-start from 6-month historical replay before enabling bandit weights.
+Three checks, all must pass before trade approval:
 
-### Additive Conviction Scoring
-- Directional and flow debaters sum independent-looking signals that share the same underlying price series.
-- RSI oversold + price below VWAP + EMA20 < EMA50 are correlated — not 3 independent votes.
-- Fix: group signals by data source, allow only one vote per group; cross-group convergence = real conviction.
+**B1/B4 — Fractional Kelly (DTE-aware)**
+`f* = (edge × odds - (1 - edge)) / odds × kelly_fraction`
+- `edge` = consensus p_bull (or 1 − p_bull for bearish)
+- `kelly_fraction` = 0.25 (quarter-Kelly)
+- DTE scaling: 0-2 DTE → 50% Kelly; 3-6 DTE → 75%; 7+ → 100%; 46+ → 75%
 
-## Missing Modules (production blockers)
+**B2 — Book-level Greeks hard caps**
+- max_net_delta: ±0.30 of account
+- max_net_vega: ±$50/1% IV move
+- max_net_theta: no single-day theta > 2% of account
+- max_single_underlying_pct: ≤25% of vega/delta in one name
 
-### Sizing Engine (oa2/sizing/) — BLOCKER for paper trading
-Required before any live or paper trading begins:
-- Fractional Kelly per trade: f* = (edge / odds) × 0.5, where edge = consensus conviction × regime win rate
-- Book-level hard caps: max net delta, max net vega, max net theta
-- CVaR scenario check: 5 stress scenarios (SPY -3%, SPY -5%, VIX +10, VIX +20, correlation spike)
-- DTE-aware sizing: smaller size for < 7 DTE short positions (gamma risk)
+**B3 — CVaR 5-scenario stress check**
+1. Underlying −3% intraday
+2. Underlying −5% intraday
+3. VIX +10 points
+4. VIX +20 points (crisis spike)
+5. Correlation spike (all positions adversely correlated)
 
-### Portfolio Orchestrator (oa2/portfolio/) — BLOCKER for paper trading
-- Book-level Δ/Γ/Θ/Vega limits with running tallies
-- Position concentration check: max % of book in single underlying
-- Correlation matrix for position clustering
+Any scenario breaching 5% of account → trade rejected or size reduced.
 
-### Exit Engine (oa2/execution/exit.py) — BLOCKER for unattended running
-- Position monitor: mark-to-market vs targets
-- Rules: 50% of max profit → close short premium; stop loss hit → close; DTE < 2 on short → close
-- Hard EOD cutoff: 3:55 PM ET force-close all intraday
-- Regime flip → re-evaluate and reduce exposure
-- Roll logic: evaluate roll vs close for near-expiration profitable positions
+## Exit engine (Phase C)
 
-## Missing Edge Factors (ranked by production impact)
+Rules evaluated in priority order on every open position:
 
-| Priority | Factor | Current State | Status |
-|---|---|---|---|
-| 1 | Real options flow / sweep tape | Fake (derived from delta) | Phase E |
-| 2 | Sizing engine (Kelly + book limits) | Empty directory | Phase B |
-| 3 | EWMA correlation matrix (live) | Hardcoded assumptions | Phase A |
-| 4 | Exit signal engine | No module exists | Phase C |
-| 5 | DTE-aware strategy routing | Not used anywhere | Phase B |
-| 6 | Max pain / call wall levels from GEX | Not computed | Phase D |
-| 7 | Intraday session regime overlay | 20-day slope only | Phase D |
-| 8 | Bandit warm-start / hierarchical prior | Flat Beta(1,1) | Phase A |
-| 9 | Cross-asset macro signals in regime | VIX + slope only | Phase D |
-| 10 | Additive conviction (signal overlap) | Simple count model | Phase A |
+1. **Hard stop** — current loss ≥ max_loss_dollars → market order close
+2. **Profit target** — current gain ≥ 50% of max_profit (short premium) → close
+3. **DTE emergency** — DTE < 2 on any short leg → close (avoid assignment)
+4. **Time stop** — position held > time_stop_days from entry → evaluate close
+5. **Hard EOD** — 3:55 PM ET → force-close all intraday positions
+6. **Regime flip** — regime ≠ entry regime → re-run consensus; if direction flips → close
 
-## DTE Edge (fundamental options concept, not yet modeled)
+Roll logic (C3): when short position is profitable (> 25% max profit), DTE < 14, regime
+unchanged → evaluate rolling to next expiration vs closing.
 
-Options edge is fundamentally a function of DTE:
-- 0-2 DTE: gamma rent cheap relative to realized moves on catalyst days → long gamma favored
-- 7-14 DTE: transition zone; theta accelerates, gamma still meaningful
-- 21-45 DTE: sweet spot for defined-risk premium selling (iron condors, verticals)
-- 60+ DTE: calendar/diagonal territory, vol term structure plays
+## Flow adapter registry (Phase E)
 
-No debater, router, or sizing rule currently uses DTE as a variable.
-Fix in Phase B (sizing) and Phase C (exit).
+Five adapters, all implement the same `FlowData` interface:
+`yfinance` (free, delayed) | `moomoo` (built-in) | `tradier` | `options_whale` | `unusual_whales`
 
-## Max Pain / Call-Put Walls (not yet computed)
+Selected via `OA2_FLOW_SOURCE` env var. Flow debater requires
+`flow_data["data_quality"] == "real"` — abstains with conviction=0.0 otherwise.
 
-The GEX computation already has the data needed. Call walls (highest OI call strike) cap intraday upside.
-Put walls provide magnetic support. Max pain (where most contracts expire worthless) is the pinning target.
-These should populate Setup.resistance_level and Setup.support_level, currently set from EMA levels alone.
-Fix in Phase D.
+## GEX / Dealer positioning (Phase 5 + D4)
+
+Net GEX = Σ(call_gamma × call_OI − put_gamma × put_OI) × spot² × 100
+
+- Positive GEX (dealers long gamma) → range-bound, dampen moves → NEUTRAL
+- Negative GEX above gamma flip → dealers short gamma, hurt on rallies → BULLISH
+- Negative GEX below gamma flip → dealers short gamma, hurt on drops → BEARISH
+
+Extended outputs (D4):
+- `call_wall` — highest OI call strike (magnetic resistance ceiling)
+- `put_wall` — highest OI put strike (magnetic support floor)
+- `max_pain` — strike minimising total aggregate option value (pinning target)
+
+Dealer signal active only for SPY/QQQ/IWM (sufficient OI data).
 
 ## Failure modes designed for
 
-- Cold-start (no covariance history) → fall back to flat weights.
-- Singular Σ → ridge-regularize with `λ=1e-3`.
-- Missing debater (timeout) → marginalize out, recompute N_eff.
-- Earnings within blackout → hard reject on mega-caps.
-- Stale OI for dealer signal → dealer debater abstains, weight reflows to others.
-- No real flow data → flow debater abstains (conviction=0.0), not fabricated.
-- Bandit cold-start → warm-start posteriors from historical replay before enabling.
-- Sizing breach → hard reject regardless of consensus score.
-- DTE < 2 on short premium → force exit, override P&L targets.
+- Cold-start (no covariance history) → fall back to flat weights
+- Singular Σ → ridge-regularize with λ=1e-3
+- Missing debater (timeout) → marginalize out, recompute N_eff
+- Earnings within blackout → hard reject on mega-caps
+- Stale OI for dealer signal → dealer abstains, weight reflows to others
+- No real flow data → flow debater abstains (conviction=0.0)
+- Bandit cold-start → warm-start posteriors from historical replay
+- Sizing breach → hard reject regardless of consensus score
+- DTE < 2 on short premium → force exit, override P&L targets
+- moomoo unavailable → yfinance fallback (options chain + bars)
 
 ## What is NOT in v2 (intentional)
 
 - Fisher agent (single-stock catalyst scanner)
 - Alpaca execution (moomoo only)
-- crisis_trade_agent.py
-- Lightweight setup check (revisit if needed)
-- Streamlit dashboard (later port)
 - LangGraph
+- Streamlit dashboard (later port)
+- Single-stock OPRA data (mega-cap dealer signal deferred)
 
-## Production Readiness Assessment
+## Paper trading gate status
 
-As of Phases 1-5 complete: the system is an entry signal generator with educated but
-partially synthetic opinions. It is NOT ready for live or unattended paper trading because:
+All hard requirements met for supervised paper trading:
+- Phase A complete: honest debaters, live EWMA correlation, warm bandit
+- Phase B complete: sizing engine passing all scenario checks
+- Phase C complete: exit engine running on all open positions
+- Phase F: v2 Sharpe ≥ v1 baseline on backtest window
 
-1. No sizing engine — wrong size kills edge even with correct direction
-2. No exit engine — options decay; winning trades become losses without exits
-3. Flow debater emits fabricated signals — adds noise to consensus
-4. Bandit cold-start — adaptive weighting is dormant for months without warm-start
-5. GLS correlations are assumptions — consensus math depends on accurate Σ
-
-Gate for paper trading cutover: Phase A + Phase B + Phase C complete, Phase F shows v2 >= v1.
+Remaining gate: 2 weeks of shadow mode with no sizing/exit rule breaches before
+enabling unsupervised paper trading.

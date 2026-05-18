@@ -55,13 +55,13 @@ A2 — Bandit warm-start: 6-month yfinance replay, scores next-day hits per
 A3 — EWMA correlation matrix: `oa2/consensus/covariance.py` (λ=0.94, min 20 obs),
 wired into `oa2/consensus/engine.py` via `OA2_FLAG_EWMA_CORR` (default on).
 
-### Phase B: Sizing Engine [CURRENT SPRINT]
+### Phase B: Sizing Engine [COMPLETE]
 
 B1 — Fractional Kelly (with DTE-aware scaling): `oa2/sizing/kelly.py`
 B2 — Book-level Greeks hard caps: `oa2/sizing/limits.py`
 B3 — CVaR 5-scenario stress check: `oa2/sizing/cvar.py`
 
-### Phase C: Exit Engine (oa2/execution/exit.py)
+### Phase C: Exit Engine [COMPLETE]
 
 C1 — Position monitor: mark-to-market vs targets on open positions.
 C2 — Exit rules: 50% profit → close short; stop hit → close; DTE < 2 → close.
@@ -69,7 +69,7 @@ C3 — Hard EOD cutoff: 3:55 PM ET force-close all intraday positions.
 C4 — Regime flip → reduce exposure, re-evaluate.
 C5 — Roll logic: evaluate roll vs close for near-expiry profitable positions.
 
-### Phase D: Regime Enhancement
+### Phase D: Regime Enhancement [COMPLETE]
 
 D1 — Session overlay: OPEN / MORNING / MIDDAY / AFTERNOON / POWER_HOUR tags.
 D2 — Early crisis signal: VIX3M/VIX ratio flattening + VVIX > 110 (leading, not lagging).
@@ -77,17 +77,17 @@ D3 — Cross-asset context: TLT, HYG, DXY as regime inputs (flight-to-safety vs 
 D4 — Max pain / call-put walls: populate Setup.resistance_level / support_level from GEX data.
 D5 — Additive conviction fix: group signals by data source; one vote per source group.
 
-### Phase E: Real Flow Data
+### Phase E: Real Flow Data [COMPLETE]
 
-E1 — Evaluate data sources: Unusual Whales API (~$50/mo) vs Tradier streaming vs broker tape.
-E2 — Wire FlowDebater to real sweeps: PCR from actual tape, not derived from chain delta.
-E3 — Dark pool integration: populate dark_pool_bullish/bearish boolean fields with real prints.
+E1 — Pluggable adapter registry: yfinance / moomoo / tradier / options_whale / unusual_whales.
+E2 — FlowDebater wired to real sweeps: PCR from tape, not chain delta.
+E3 — Dark pool fields populated from real prints when adapter supports it.
 
-### Phase F: Backtesting Harness
+### Phase F: Backtesting Harness [COMPLETE]
 
 F1 — Historical replay: 6-12 months of daily OHLCV + EOD options snapshots via yfinance.
-F2 — Per-debater accuracy by regime: measure signal quality before live weighting.
-F3 — A/B vs v1: wire OA2_FLAG_AB_V1 to actually compare consensus vs v1 decisions.
+F2 — Per-debater accuracy by regime: signal quality measured before live weighting.
+F3 — A/B vs v1: OA2_FLAG_AB_V1 compares v2 consensus vs v1 decisions.
 F4 — Paper cutover gate: v2 Sharpe >= v1 Sharpe on 90-day backtest window.
 
 ## Core decisions (locked, don't relitigate)
@@ -129,10 +129,13 @@ F4 — Paper cutover gate: v2 Sharpe >= v1 Sharpe on 90-day backtest window.
 | Smoke test? | `scripts/smoke_test.py` |
 | Architecture + gap analysis? | `ARCHITECTURE.md` |
 | Full production roadmap? | `ROADMAP.md` |
-| Phase summaries? | `PHASE1_SUMMARY.md`, `PHASE2_3_SUMMARY.md`, `PHASE4_5_SUMMARY.md` |
-| Kelly sizing engine? | `oa2/sizing/kelly.py` (Phase B1/B4) |
-| Greek hard caps? | `oa2/sizing/limits.py` (Phase B2) |
-| CVaR stress check? | `oa2/sizing/cvar.py` (Phase B3) |
-| Exit engine? | `oa2/execution/exit.py` (Phase C — not yet built) |
-| Bandit warm-start? | `scripts/bandit_warmstart.py` (Phase A2 — complete) |
-| EWMA covariance? | `oa2/consensus/covariance.py` (Phase A3 — complete) |
+| Kelly sizing engine? | `oa2/sizing/kelly.py` |
+| Greek hard caps? | `oa2/sizing/limits.py` |
+| CVaR stress check? | `oa2/sizing/cvar.py` |
+| Exit engine? | `oa2/execution/exit.py` |
+| Roll logic? | `oa2/execution/roll.py` |
+| Position monitor? | `oa2/execution/monitor.py` |
+| Flow adapter registry? | `oa2/dataflows/flow_adapter.py` |
+| Bandit warm-start? | `scripts/bandit_warmstart.py` |
+| EWMA covariance? | `oa2/consensus/covariance.py` |
+| Backtest harness? | `scripts/backtest.py` |
