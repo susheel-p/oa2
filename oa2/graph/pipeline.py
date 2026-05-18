@@ -1,25 +1,39 @@
 """oa2 pipeline — plain Python orchestration of the 9-layer architecture.
 
-Phases completed:
-- Phase 1: 5 debaters + JSONL logging
-- Phase 2: Regime classifier (8-bucket vol × trend)
-- Phase 3: Consensus engine (GLS aggregation)
-- Phase 4: Thompson sampling bandit (adaptive debater weighting)
-- Phase 5: Dealer agent (institutional positioning via GEX)
+Phases wired:
+- Phase 1:   5 debaters + JSONL logging
+- Phase 2:   Regime classifier (8-bucket vol × trend)
+- Phase 3:   Consensus engine (GLS aggregation)
+- Phase 4:   Thompson sampling bandit (adaptive debater weighting)
+- Phase 5:   Dealer agent (institutional positioning via GEX)
+- Phase B:   Sizing engine — Kelly (B1/B4) + Greeks limits (B2) + CVaR (B3)
+- Phase C:   Exit engine — exit rule tagging + open-position exit alerts
 """
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from oa2.consensus.engine import ConsensusEngine
 from oa2.core import feature_flags
-from oa2.debaters.runner import DebaterEnsemble
-from oa2.regime.classifier import RegimeClassifier
-from oa2.performance.bandit import BanditEngine
 from oa2.dealer.agent import DealerAgent
+from oa2.debaters.runner import DebaterEnsemble
+from oa2.execution.exit import ExitEngine
+from oa2.execution.monitor import PositionMonitor
+from oa2.performance.bandit import BanditEngine
+from oa2.regime.classifier import RegimeClassifier
+from oa2.sizing.cvar import CVaRChecker
+from oa2.sizing.kelly import size_from_consensus
+from oa2.sizing.limits import GreeksBook
 
+_DEFAULT_ACCOUNT_SIZE = 50_000.0
+
+
+# =============================================================================
+# Pipeline context
+# =============================================================================
 
 @dataclass
 class PipelineContext:
@@ -27,43 +41,75 @@ class PipelineContext:
     ticker: str
     as_of: str | None = None
     market_data: dict[str, Any] = field(default_factory=dict)
-    regime: dict[str, Any] | None = None
+    regime: Any | None = None
     context_agents: dict[str, Any] = field(default_factory=dict)
     debater_opinions: list[Any] = field(default_factory=list)
-    consensus: dict[str, Any] | None = None
+    consensus: Any | None = None
+    sizing: dict[str, Any] | None = None
+    exit_rules: dict[str, Any] | None = None
+    open_position_exits: list[dict[str, Any]] = field(default_factory=list)
     decision: dict[str, Any] | None = None
     attribution: dict[str, Any] = field(default_factory=dict)
 
 
-def run(ticker: str, as_of: str | None = None, context_dict: dict[str, Any] | None = None) -> PipelineContext:
+# =============================================================================
+# Main entry point
+# =============================================================================
+
+def run(
+    ticker: str,
+    as_of: str | None = None,
+    context_dict: dict[str, Any] | None = None,
+    account_size: float = _DEFAULT_ACCOUNT_SIZE,
+    book: GreeksBook | None = None,
+    monitor: PositionMonitor | None = None,
+) -> PipelineContext:
     """End-to-end pipeline for one ticker.
 
     Layers (each gated by a feature flag):
       L0  fetch market data
-      L1  regime classification (Phase 2)
-      L2  context agents (Phase 5)
-      L3  timeframe routing
-      L4  debater ensemble (Phase 1)
-      L5  consensus engine (Phase 3)
-      L6  sizing
-      L7  portfolio orchestration
-      L8  execution / journal write
+      L1  regime classification             (OA2_FLAG_REGIME)
+      L2  context agents / dealer           (OA2_FLAG_DEALER)
+      L3  timeframe routing                 (implicit in pipeline order)
+      L4  debater ensemble                  (OA2_FLAG_DEBATERS)
+      L5  consensus engine + bandit         (OA2_FLAG_CONSENSUS, OA2_FLAG_BANDIT)
+      L6  sizing: Kelly + Greeks limits + CVaR  (OA2_FLAG_SIZING)
+      L7  portfolio: book Greeks state      (OA2_FLAG_SIZING)
+      L8  exit engine: tag + open-position alerts  (OA2_FLAG_EXIT)
 
     Args:
-        ticker: stock/ETF symbol
-        as_of: optional date for backtesting
-        context_dict: optional dict with pre-populated market data, regime, etc.
-                      used for backtesting; real-time uses default stubs
+        ticker:       Stock/ETF symbol.
+        as_of:        Optional date string for backtesting.
+        context_dict: Optional pre-populated market data (backtest / unit tests).
+                      Real-time mode uses a stub dict.
+        account_size: Total account equity in dollars (default $50,000).
+        book:         GreeksBook tracking open-position Greeks across the full
+                      book.  If None, a fresh empty book is created (no existing
+                      exposure — safe for single-run calls).
+        monitor:      PositionMonitor tracking open positions.  When provided,
+                      the exit engine is run against all open positions for this
+                      ticker and alerts are included in the decision.
+
+    Returns:
+        PipelineContext with decision, sizing, exit_rules, attribution, and
+        (optionally) open_position_exits populated.
     """
     ctx = PipelineContext(ticker=ticker, as_of=as_of)
 
-    # L0 — market data (stub if not provided)
+    if book is None:
+        book = GreeksBook(account_size=account_size)
+
+    # ------------------------------------------------------------------
+    # L0 — market data
+    # ------------------------------------------------------------------
     if context_dict:
         ctx.market_data = context_dict.copy()
     else:
         ctx.market_data = {"ticker": ticker, "stub": True}
 
-    # L1 — regime classifier (Phase 2)
+    # ------------------------------------------------------------------
+    # L1 — regime classifier
+    # ------------------------------------------------------------------
     if feature_flags.REGIME_CLASSIFIER_ENABLED:
         classifier = RegimeClassifier()
         ctx.regime = classifier.classify(ctx.market_data)
@@ -76,7 +122,9 @@ def run(ticker: str, as_of: str | None = None, context_dict: dict[str, Any] | No
     else:
         ctx.regime = None
 
-    # L2 — dealer agent (Phase 5)
+    # ------------------------------------------------------------------
+    # L2 — dealer agent (context + optional 6th debater)
+    # ------------------------------------------------------------------
     if feature_flags.DEALER_AGENT_ENABLED or feature_flags.DEALER_SHADOW_LOG:
         dealer = DealerAgent()
         dealer_opinion = dealer.debate(ctx.market_data)
@@ -87,35 +135,38 @@ def run(ticker: str, as_of: str | None = None, context_dict: dict[str, Any] | No
                 "conviction": dealer_opinion.conviction,
                 "signals": dealer_opinion.signals_used,
             }
-        else:  # shadow mode only
+        else:
             ctx.attribution["dealer_shadow"] = {
                 "direction": dealer_opinion.direction.value,
                 "conviction": dealer_opinion.conviction,
                 "signals": dealer_opinion.signals_used,
             }
 
-    # L4 — debaters (Phase 1 + Phase 5 dealer agent)
+    # ------------------------------------------------------------------
+    # L4 — debater ensemble
+    # ------------------------------------------------------------------
     if feature_flags.DEBATERS_ENABLED:
         ensemble = DebaterEnsemble()
         ctx.debater_opinions = ensemble.run(ctx.market_data, log_to_disk=True)
-        # Inject dealer opinion if Phase 5 enabled
         if feature_flags.DEALER_AGENT_ENABLED and "dealer_opinion" in ctx.context_agents:
             ctx.debater_opinions.append(ctx.context_agents["dealer_opinion"])
         ctx.attribution["debater_ensemble"] = ensemble.opinions_summary(ctx.debater_opinions)
     else:
         ctx.debater_opinions = []
 
-    # L5 — consensus engine (Phase 3 + Phase 4 bandit weights)
+    # ------------------------------------------------------------------
+    # L5 — consensus engine + bandit weights
+    # ------------------------------------------------------------------
     if feature_flags.CONSENSUS_ENGINE_ENABLED and ctx.debater_opinions:
         regime_id = ctx.regime.regime_id if ctx.regime else None
 
-        # Phase 4: load bandit prior weights
         bandit_weights = None
         if feature_flags.BANDIT_ENABLED and regime_id is not None:
             bandit = BanditEngine.load()
             debater_names = [op.debater_name for op in ctx.debater_opinions]
             bandit_weights = bandit.get_regime_weights(
-                debater_names, regime_id, use_mean=feature_flags.BANDIT_USE_POSTERIOR_MEAN
+                debater_names, regime_id,
+                use_mean=feature_flags.BANDIT_USE_POSTERIOR_MEAN,
             )
             ctx.attribution["bandit_weights"] = bandit_weights
 
@@ -131,26 +182,321 @@ def run(ticker: str, as_of: str | None = None, context_dict: dict[str, Any] | No
     else:
         ctx.consensus = None
 
-    # Determine decision status and output
-    if ctx.consensus:
+    # ------------------------------------------------------------------
+    # L6 — sizing engine (Kelly + book limits + CVaR)
+    # ------------------------------------------------------------------
+    if feature_flags.SIZING_ENGINE_ENABLED and ctx.consensus is not None:
+        ctx.sizing = _run_sizing(ctx, book, account_size)
+        ctx.attribution["sizing"] = ctx.sizing
+
+    # ------------------------------------------------------------------
+    # L7 — portfolio: book state summary
+    # ------------------------------------------------------------------
+    if feature_flags.SIZING_ENGINE_ENABLED:
+        ctx.attribution["book_state"] = book.summary()
+
+    # ------------------------------------------------------------------
+    # L8 — exit engine: tag trade + check open positions
+    # ------------------------------------------------------------------
+    if feature_flags.EXIT_ENGINE_ENABLED:
+        if ctx.sizing and ctx.sizing.get("approved"):
+            ctx.exit_rules = _build_exit_rules(ctx)
+            ctx.attribution["exit_rules"] = ctx.exit_rules
+
+        if monitor is not None:
+            alerts = _check_open_positions(ctx, monitor)
+            ctx.open_position_exits = alerts
+            if alerts:
+                ctx.attribution["open_position_exit_alerts"] = alerts
+
+    # ------------------------------------------------------------------
+    # Assemble decision
+    # ------------------------------------------------------------------
+    ctx.decision = _build_decision(ctx, ticker)
+    return ctx
+
+
+# =============================================================================
+# L6 helper — sizing
+# =============================================================================
+
+def _run_sizing(
+    ctx: PipelineContext,
+    book: GreeksBook,
+    account_size: float,
+) -> dict[str, Any]:
+    """Run the three-gate sizing pipeline for the proposed trade.
+
+    Reads trade parameters from market_data; falls back to sensible stub
+    defaults when running without real chain data.
+
+    Gates (all must pass):
+        B1/B4  Kelly — positive edge, DTE-aware scaling
+        B2     GreeksBook — no hard-cap breach after proposed trade
+        B3     CVaR — no stress scenario exceeds 5% of account
+
+    Returns a dict describing the outcome and diagnostics for attribution.
+    """
+    md = ctx.market_data
+    consensus = ctx.consensus
+
+    price = float(md.get("price", 100.0))
+    max_profit = float(md.get("max_profit", 200.0))
+    max_loss = float(md.get("max_loss", 300.0))
+    dte = int(md.get("dte", 30))
+    delta_per = float(md.get("delta_per_contract", 15.0))
+    vega_per = float(md.get("vega_per_contract", 8.0))
+    theta_per = float(md.get("theta_per_contract", -5.0))
+
+    direction = consensus.direction.value
+    p_bull = consensus.p_bull
+
+    # --- Gate B1/B4: Kelly ---
+    kelly = size_from_consensus(
+        p_bull=p_bull,
+        direction=direction,
+        max_profit=max_profit,
+        max_loss=max_loss,
+        dte=dte,
+        account_size=account_size,
+    )
+
+    kelly_diag = {
+        "kelly_f": kelly.kelly_f,
+        "dte_scalar": kelly.dte_scalar,
+        "edge": kelly.edge,
+        "odds": kelly.odds,
+        "kelly_contracts": kelly.contracts,
+    }
+
+    if not kelly.viable:
+        return {
+            "approved": False,
+            "reject_gate": "kelly",
+            "reject_reason": kelly.reject_reason,
+            "contracts": 0,
+            "kelly": kelly_diag,
+        }
+
+    # --- Gate B2: book Greeks limits ---
+    # Scale down if the full Kelly count would breach caps, then hard-check.
+    final_contracts = book.scale_to_fit(
+        delta=delta_per * kelly.contracts,
+        vega=vega_per * kelly.contracts,
+        theta=theta_per * kelly.contracts,
+        underlying=ctx.ticker,
+        contracts_requested=kelly.contracts,
+    )
+
+    if final_contracts == 0:
+        return {
+            "approved": False,
+            "reject_gate": "book_limits",
+            "reject_reason": (
+                f"Book limits prevent any contracts for {ctx.ticker} at current exposure."
+            ),
+            "contracts": 0,
+            "kelly": kelly_diag,
+        }
+
+    limit_check = book.check_proposed(
+        delta=delta_per * final_contracts,
+        vega=vega_per * final_contracts,
+        theta=theta_per * final_contracts,
+        underlying=ctx.ticker,
+    )
+
+    if not limit_check.approved:
+        return {
+            "approved": False,
+            "reject_gate": "book_limits",
+            "reject_reason": limit_check.reject_reason,
+            "contracts": 0,
+            "kelly": kelly_diag,
+        }
+
+    # --- Gate B3: CVaR stress check ---
+    cvar_checker = CVaRChecker(account_size=account_size)
+    cvar_result = cvar_checker.check(
+        delta=delta_per,
+        vega=vega_per,
+        price=price,
+        contracts=final_contracts,
+        book_delta=book.net_delta,
+        book_vega=book.net_vega,
+    )
+
+    cvar_diag = {
+        "worst_scenario": cvar_result.worst_scenario,
+        "worst_pnl": round(cvar_result.worst_pnl, 2),
+        "budget_dollars": round(cvar_result.budget_dollars, 2),
+    }
+
+    if not cvar_result.approved:
+        # Try scaling down to fit within CVaR budget before hard reject
+        reduced = cvar_checker.max_contracts_within_budget(
+            delta=delta_per,
+            vega=vega_per,
+            price=price,
+            requested=final_contracts,
+            book_delta=book.net_delta,
+            book_vega=book.net_vega,
+        )
+
+        if reduced == 0:
+            return {
+                "approved": False,
+                "reject_gate": "cvar",
+                "reject_reason": cvar_result.reject_reason,
+                "contracts": 0,
+                "kelly": kelly_diag,
+                "cvar": cvar_diag,
+            }
+
+        # CVaR reduced the count — re-verify book limits with smaller size
+        limit_recheck = book.check_proposed(
+            delta=delta_per * reduced,
+            vega=vega_per * reduced,
+            theta=theta_per * reduced,
+            underlying=ctx.ticker,
+        )
+        if not limit_recheck.approved:
+            return {
+                "approved": False,
+                "reject_gate": "book_limits_after_cvar_reduction",
+                "reject_reason": limit_recheck.reject_reason,
+                "contracts": 0,
+                "kelly": kelly_diag,
+                "cvar": cvar_diag,
+            }
+
+        final_contracts = reduced
+        # Re-fetch limit_check for headroom reporting at the reduced size
+        limit_check = limit_recheck
+
+    # All three gates passed
+    kelly_diag["final_contracts"] = final_contracts
+
+    return {
+        "approved": True,
+        "contracts": final_contracts,
+        "max_dollars_at_risk": round(final_contracts * max_loss, 2),
+        "max_profit_dollars": round(final_contracts * max_profit, 2),
+        "kelly": kelly_diag,
+        "book_after": {
+            "delta_after": round(limit_check.delta_after, 2),
+            "vega_after": round(limit_check.vega_after, 2),
+            "theta_after": round(limit_check.theta_after, 2),
+            "delta_headroom": round(limit_check.delta_headroom, 2),
+            "vega_headroom": round(limit_check.vega_headroom, 2),
+            "theta_headroom": round(limit_check.theta_headroom, 2),
+        },
+        "cvar": cvar_diag,
+    }
+
+
+# =============================================================================
+# L8 helpers — exit engine
+# =============================================================================
+
+def _build_exit_rules(ctx: PipelineContext) -> dict[str, Any]:
+    """Build exit parameters for a newly approved trade.
+
+    These are attached to the OpenPosition when it is registered in the
+    PositionMonitor after execution.  The ExitEngine reads them on every
+    evaluation tick.
+    """
+    md = ctx.market_data
+    contracts = ctx.sizing["contracts"]
+    max_loss = float(md.get("max_loss", 300.0))
+    max_profit = float(md.get("max_profit", 200.0))
+    dte = int(md.get("dte", 30))
+
+    return {
+        "trade_id": str(uuid.uuid4()),
+        "stop_loss_pct": 1.00,
+        "profit_target_pct": 0.50,
+        "dte_emergency_threshold": 2,
+        "time_stop_days": min(dte, 21),
+        "max_loss_dollars": round(contracts * max_loss, 2),
+        "max_profit_dollars": round(contracts * max_profit, 2),
+        "structure": md.get("structure", "VERTICAL_CALL_SPREAD"),
+    }
+
+
+def _check_open_positions(
+    ctx: PipelineContext,
+    monitor: PositionMonitor,
+) -> list[dict[str, Any]]:
+    """Run exit engine against all open positions for this ticker.
+
+    Called on every pipeline run so that open positions are evaluated against
+    the freshly computed regime and consensus before a new trade is considered.
+    Only positions where should_exit=True are returned.
+    """
+    positions = monitor.positions_for(ctx.ticker)
+    if not positions:
+        return []
+
+    exit_context: dict[str, Any] = {}
+    if ctx.regime is not None:
+        exit_context["regime_id"] = ctx.regime.regime_id
+    if ctx.consensus is not None:
+        exit_context["consensus_direction"] = ctx.consensus.direction.value
+
+    engine = ExitEngine()
+    decisions = engine.exits_required(positions, context=exit_context)
+
+    return [
+        {
+            "trade_id": d.trade_id,
+            "should_exit": d.should_exit,
+            "reason": d.reason.value if d.reason else None,
+            "urgency": d.urgency.value if d.urgency else None,
+            "detail": d.detail,
+            "current_pnl": d.current_pnl,
+            "current_dte": d.current_dte,
+        }
+        for d in decisions
+    ]
+
+
+# =============================================================================
+# Decision assembler
+# =============================================================================
+
+def _build_decision(ctx: PipelineContext, ticker: str) -> dict[str, Any]:
+    """Assemble the final decision dict from pipeline context."""
+    if ctx.sizing is not None:
+        status = "sized_approved" if ctx.sizing["approved"] else "sized_rejected"
+    elif ctx.consensus is not None:
         status = "full_pipeline"
-        direction = ctx.consensus.direction.value
-        consensus_score = ctx.consensus.score
     elif ctx.debater_opinions:
         status = "debaters_only"
-        direction = None
-        consensus_score = None
     else:
         status = "scaffold_only"
-        direction = None
-        consensus_score = None
 
-    ctx.decision = {
+    decision: dict[str, Any] = {
         "status": status,
         "ticker": ticker,
         "regime_id": ctx.regime.regime_id if ctx.regime else None,
         "opinion_count": len(ctx.debater_opinions),
-        "direction": direction,
-        "consensus_score": consensus_score,
+        "direction": ctx.consensus.direction.value if ctx.consensus else None,
+        "consensus_score": ctx.consensus.score if ctx.consensus else None,
+        "p_bull": ctx.consensus.p_bull if ctx.consensus else None,
     }
-    return ctx
+
+    if ctx.sizing is not None:
+        decision["contracts"] = ctx.sizing.get("contracts", 0)
+        decision["max_dollars_at_risk"] = ctx.sizing.get("max_dollars_at_risk")
+        if not ctx.sizing["approved"]:
+            decision["sizing_reject_reason"] = ctx.sizing.get("reject_reason")
+            decision["sizing_reject_gate"] = ctx.sizing.get("reject_gate")
+
+    if ctx.exit_rules is not None:
+        decision["exit_rules"] = ctx.exit_rules
+
+    if ctx.open_position_exits:
+        decision["open_position_exit_alerts"] = ctx.open_position_exits
+
+    return decision
