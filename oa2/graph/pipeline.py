@@ -20,6 +20,7 @@ from oa2.consensus.calibration import Calibrator, default_calibrator_path
 from oa2.consensus.engine import ConsensusEngine
 from oa2.core import feature_flags
 from oa2.core.clock import Clock, SystemClock
+from oa2.core.logging_util import PipelineLogger, get_detail_logging_enabled
 from oa2.dealer.agent import DealerAgent
 from oa2.debaters.runner import DebaterEnsemble
 from oa2.execution.exit import ExitEngine
@@ -102,6 +103,11 @@ def run(
     """
     ctx = PipelineContext(ticker=ticker, as_of=as_of)
 
+    # Initialize logger
+    detail_logging = get_detail_logging_enabled()
+    logger = PipelineLogger(detail_logging=detail_logging, ticker=ticker)
+    logger.log_stage("L0", f"Pipeline starting (account=${account_size:,.0f})")
+
     if book is None:
         book = GreeksBook(account_size=account_size)
     if clock is None:
@@ -121,15 +127,24 @@ def run(
     # historical replay (see dataflows/cache.py C1 gating).
     if context_dict:
         ctx.market_data = context_dict.copy()
+        logger.log_detail("Using injected context (backtest/test mode)", {})
     else:
         try:
             import datetime as _dt
             from oa2.dataflows.cache import fetch_with_cache
             fetch_date = as_of or _dt.date.today().isoformat()
+            logger.log_detail("Fetching live market data", {"date": fetch_date})
             ctx.market_data = fetch_with_cache(ticker, fetch_date)
+            quote = ctx.market_data.get("quote", {})
+            logger.log_detail("Market snapshot received", {
+                "price": quote.get("last_price"),
+                "bid": quote.get("bid"),
+                "ask": quote.get("ask"),
+            })
         except Exception as e:
             import warnings as _warnings
             _warnings.warn(f"L0 fetch failed for {ticker} ({e}); pipeline running with stub context")
+            logger.log_warning("L0 fetch failed", str(e))
             ctx.market_data = {"ticker": ticker, "stub": True, "fetch_error": str(e)}
 
     # ------------------------------------------------------------------
@@ -140,11 +155,21 @@ def run(
     try:
         from oa2.dataflows.flow_adapter import auto_adapter
         flow_adapter = auto_adapter()
+        logger.log_detail("Fetching flow data", {"adapter": flow_adapter.name})
         flow_data = flow_adapter.fetch(ticker, date=as_of)
         ctx.market_data["flow_data"] = flow_data
+
+        data_quality = flow_data.get("data_quality", "absent")
+        logger.log_detail("Flow data received", {
+            "quality": data_quality,
+            "pcr": flow_data.get("put_call_ratio"),
+            "unusual_call_vol": flow_data.get("unusual_call_vol"),
+            "unusual_put_vol": flow_data.get("unusual_put_vol"),
+        })
     except Exception as e:
         import warnings as _warnings
         _warnings.warn(f"L0b flow data fetch failed: {e}; FlowDebater will abstain")
+        logger.log_warning("L0b flow data fetch failed", str(e))
         ctx.market_data["flow_data"] = {"data_quality": "absent"}
 
     # ------------------------------------------------------------------
@@ -186,11 +211,22 @@ def run(
     # L4 — debater ensemble
     # ------------------------------------------------------------------
     if feature_flags.DEBATERS_ENABLED:
+        logger.log_stage("L4", "Running debater ensemble (6 debaters)")
         ensemble = DebaterEnsemble()
         ctx.debater_opinions = ensemble.run(ctx.market_data, log_to_disk=True)
         if feature_flags.DEALER_AGENT_ENABLED and "dealer_opinion" in ctx.context_agents:
             ctx.debater_opinions.append(ctx.context_agents["dealer_opinion"])
         ctx.attribution["debater_ensemble"] = ensemble.opinions_summary(ctx.debater_opinions)
+
+        # Log each debater's opinion
+        for opinion in ctx.debater_opinions:
+            abstained = opinion.conviction == 0.0
+            if abstained:
+                logger.log_signal(opinion.debater_name, "ABSTAINED", {})
+            else:
+                logger.log_signal(opinion.debater_name, f"{opinion.direction.value}", {
+                    "conviction": round(opinion.conviction, 3),
+                })
     else:
         ctx.debater_opinions = []
 
@@ -198,6 +234,7 @@ def run(
     # L5 — consensus engine + bandit weights
     # ------------------------------------------------------------------
     if feature_flags.CONSENSUS_ENGINE_ENABLED and ctx.debater_opinions:
+        logger.log_stage("L5", "Aggregating consensus (GLS engine)")
         regime_id = ctx.regime.regime_id if ctx.regime else None
 
         bandit_weights = None
@@ -209,6 +246,7 @@ def run(
                 use_mean=feature_flags.BANDIT_USE_POSTERIOR_MEAN,
             )
             ctx.attribution["bandit_weights"] = bandit_weights
+            logger.log_detail("Bandit weights applied", {}, "L5")
 
         consensus_engine = ConsensusEngine(regime=regime_id, prior_weights=bandit_weights)
         ctx.consensus = consensus_engine.aggregate(ctx.debater_opinions)
@@ -218,6 +256,18 @@ def run(
         raw_p_bull = ctx.consensus.p_bull
         calibrated_p_bull = calibrator.transform(raw_p_bull)
         ctx.consensus.p_bull = calibrated_p_bull
+
+        logger.log_consensus(
+            ctx.consensus.direction.value,
+            calibrated_p_bull,
+            ctx.consensus.n_eff,
+            ctx.consensus.weights
+        )
+        logger.log_detail("Calibration applied", {
+            "raw_p_bull": round(raw_p_bull, 3),
+            "calibrated_p_bull": round(calibrated_p_bull, 3),
+            "calibrator_mode": calibrator.state.mode,
+        }, "L5")
 
         ctx.attribution["consensus"] = {
             "direction": ctx.consensus.direction.value,
@@ -236,8 +286,20 @@ def run(
     # L6 — sizing engine (Kelly + book limits + CVaR)
     # ------------------------------------------------------------------
     if feature_flags.SIZING_ENGINE_ENABLED and ctx.consensus is not None:
+        logger.log_stage("L6", "Running sizing gates (Kelly → Greeks → Scenario → MC CVaR)")
         ctx.sizing = _run_sizing(ctx, book, account_size)
         ctx.attribution["sizing"] = ctx.sizing
+
+        if ctx.sizing.get("approved"):
+            logger.log_sizing("APPROVED", data={
+                "contracts": ctx.sizing.get("contracts"),
+                "kelly_f": ctx.sizing.get("kelly", {}).get("kelly_f"),
+                "risk_dollars": ctx.sizing.get("max_dollars_at_risk"),
+            })
+        else:
+            reason = ctx.sizing.get("reject_reason", "unknown")
+            gate = ctx.sizing.get("reject_gate", "unknown")
+            logger.log_sizing("REJECTED", f"Gate {gate}", {"reason": reason})
 
     # ------------------------------------------------------------------
     # L7 — portfolio: book state summary
