@@ -403,6 +403,7 @@ class MoomooFlowAdapter(FlowAdapterBase):
 
     def fetch(self, ticker: str, date: str | None = None) -> dict[str, Any]:
         fd = FlowData.absent(self.name)
+        fd.as_of = date or datetime.date.today().isoformat()
 
         if not self.is_configured():
             fd.error = (
@@ -411,24 +412,64 @@ class MoomooFlowAdapter(FlowAdapterBase):
             )
             return fd.to_dict()
 
-        # TODO: implement when moomoo-api is installed and OpenD is running.
-        #
-        # from moomoo import OpenQuoteContext, SubType, KLType
-        # ctx = OpenQuoteContext(host=self._host, port=self._port)
-        # ret, data = ctx.get_option_chain(code=f"US.{ticker}", ...)
-        # → parse call/put volume, OI, into FlowData fields
-        # ctx.close()
-        #
-        # Once implemented:
-        #   fd.put_call_ratio = total_put_vol / total_call_vol
-        #   fd.large_call_oi_change = (today_call_oi - prev_call_oi) / prev_call_oi
-        #   fd.unusual_call_vol = call_vol > (avg_call_vol * 2.0)
-        #   fd.mark_real()
-        fd.error = (
-            "Moomoo API wiring not yet implemented. "
-            "See flow_adapter.py MoomooFlowAdapter.fetch() TODO block."
-        )
-        return fd.to_dict()
+        try:
+            from oa2.dataflows.moomoo_data import fetch_market_snapshot
+        except ImportError:
+            fd.error = "moomoo_data module not found"
+            return fd.to_dict()
+
+        try:
+            snapshot = fetch_market_snapshot(ticker)
+
+            # Check for errors in snapshot
+            if "error" in snapshot:
+                fd.error = snapshot.get("error")
+                return fd.to_dict()
+
+            # Extract flow analysis from snapshot
+            flow_analysis = snapshot.get("flow_analysis", {})
+            depth_analysis = snapshot.get("depth_analysis", {})
+
+            # Populate FlowData from moomoo analysis
+            if flow_analysis.get("data_quality") == "real":
+                fd.put_call_ratio = flow_analysis.get("put_call_ratio")
+
+                # Detect unusual volume concentration (>65% in top 3 strikes = concentrated/unusual)
+                call_conc = flow_analysis.get("call_vol_concentration", 0)
+                put_conc = flow_analysis.get("put_vol_concentration", 0)
+                fd.unusual_call_vol = call_conc > 65
+                fd.unusual_put_vol = put_conc > 65
+
+                # Count aggressive buys as proxy for sweeps
+                fd.call_sweep_count = flow_analysis.get("aggressive_call_buying", 0)
+                fd.put_sweep_count = flow_analysis.get("aggressive_put_buying", 0)
+
+                # Gamma concentration >60% in top 3 indicates positioning/risk concentration
+                call_gamma_conc = flow_analysis.get("call_gamma_concentration", 0)
+                put_gamma_conc = flow_analysis.get("put_gamma_concentration", 0)
+
+                # Use gamma concentration as a proxy for institutional activity
+                # (high gamma = more dealer hedging activity)
+                if call_gamma_conc > 60:
+                    fd.unusual_call_vol = True
+                if put_gamma_conc > 60:
+                    fd.unusual_put_vol = True
+
+            # Depth analysis for order flow imbalance
+            if depth_analysis.get("data_quality") == "real":
+                imbalance = depth_analysis.get("bid_ask_imbalance", 0)
+                # Strong imbalance > 0.2 indicates heavy flow direction
+                if imbalance > 0.20:
+                    fd.dark_pool_bullish = True  # More buy pressure
+                elif imbalance < -0.20:
+                    fd.dark_pool_bearish = True  # More sell pressure
+
+            fd.mark_real()
+            return fd.to_dict()
+
+        except Exception as e:
+            fd.error = f"Moomoo fetch failed: {str(e)}"
+            return fd.to_dict()
 
 
 # ---------------------------------------------------------------------------

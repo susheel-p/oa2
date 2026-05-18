@@ -491,8 +491,128 @@ def calculate_iv_rank(ticker: str, days_back: int = 252) -> float:
 
 # ── Unified Data Package ───────────────────────────────────────────────────
 
+# ── Options Flow Analysis (new) ───────────────────────────────────────────
+
+def analyze_options_flow(chain: Dict[str, Any]) -> Dict[str, Any]:
+    """Analyze options volume and Greeks for flow signals.
+
+    Returns:
+        {
+            'put_call_ratio': float,           # Put vol / Call vol
+            'call_vol_concentration': float,   # % of call vol in top 3 strikes
+            'put_vol_concentration': float,    # % of put vol in top 3 strikes
+            'aggressive_call_buying': int,     # Calls where ask_size << volume
+            'aggressive_put_buying': int,      # Puts where ask_size << volume
+            'call_gamma_concentration': float, # % of gamma in top 3 calls
+            'put_gamma_concentration': float,  # % of gamma in top 3 puts
+            'data_quality': 'real' | 'partial' | 'absent'
+        }
+    """
+    calls = chain.get('calls', [])
+    puts = chain.get('puts', [])
+
+    if not calls or not puts:
+        return {'data_quality': 'absent'}
+
+    # PCR from volume
+    total_call_vol = sum(c.get('volume', 0) for c in calls)
+    total_put_vol = sum(p.get('volume', 0) for p in puts)
+
+    if total_call_vol == 0 and total_put_vol == 0:
+        return {'data_quality': 'absent'}
+
+    pcr = total_put_vol / total_call_vol if total_call_vol > 0 else 0.0
+
+    # Volume concentration (top 3 strikes)
+    top_calls = sorted(calls, key=lambda x: x.get('volume', 0), reverse=True)[:3]
+    top_puts = sorted(puts, key=lambda x: x.get('volume', 0), reverse=True)[:3]
+
+    call_top_vol = sum(c.get('volume', 0) for c in top_calls)
+    put_top_vol = sum(p.get('volume', 0) for p in top_puts)
+
+    call_concentration = (call_top_vol / total_call_vol * 100) if total_call_vol > 0 else 0
+    put_concentration = (put_top_vol / total_put_vol * 100) if total_put_vol > 0 else 0
+
+    # Aggressive buys (volume >> ask_size, typical of sweeps)
+    agg_calls = sum(1 for c in calls
+                    if c.get('volume', 0) > 5 and c.get('ask_size', 0) < c.get('volume', 0) / 3)
+    agg_puts = sum(1 for p in puts
+                   if p.get('volume', 0) > 5 and p.get('ask_size', 0) < p.get('volume', 0) / 3)
+
+    # Gamma concentration (top 3)
+    call_gammas = [abs(c.get('gamma', 0)) for c in calls]
+    put_gammas = [abs(p.get('gamma', 0)) for p in puts]
+
+    total_call_gamma = sum(call_gammas)
+    total_put_gamma = sum(put_gammas)
+
+    top_call_gamma = sum(sorted(call_gammas, reverse=True)[:3])
+    top_put_gamma = sum(sorted(put_gammas, reverse=True)[:3])
+
+    call_gamma_conc = (top_call_gamma / total_call_gamma * 100) if total_call_gamma > 0 else 0
+    put_gamma_conc = (top_put_gamma / total_put_gamma * 100) if total_put_gamma > 0 else 0
+
+    return {
+        'put_call_ratio': pcr,
+        'call_vol_concentration': call_concentration,
+        'put_vol_concentration': put_concentration,
+        'aggressive_call_buying': agg_calls,
+        'aggressive_put_buying': agg_puts,
+        'call_gamma_concentration': call_gamma_conc,
+        'put_gamma_concentration': put_gamma_conc,
+        'data_quality': 'real' if total_call_vol > 0 and total_put_vol > 0 else 'partial'
+    }
+
+
+def analyze_market_depth(ticker: str) -> Dict[str, Any]:
+    """Analyze order flow imbalance from bid/ask levels.
+
+    Returns:
+        {
+            'bid_ask_imbalance': float,      # (bid_size - ask_size) / (bid_size + ask_size)
+            'spread_pct': float,              # (ask - bid) / mid
+            'order_flow_signal': 'bullish' | 'bearish' | 'neutral',
+            'data_quality': 'real' | 'absent'
+        }
+    """
+    quote = fetch_quote(ticker)
+
+    if not quote or quote.get('bid', 0) == 0 or quote.get('ask', 0) == 0:
+        return {'data_quality': 'absent'}
+
+    bid_size = quote.get('bid_size', 0)
+    ask_size = quote.get('ask_size', 0)
+    bid = quote.get('bid', 0)
+    ask = quote.get('ask', 0)
+
+    if bid_size + ask_size == 0:
+        return {'data_quality': 'absent'}
+
+    # Order flow imbalance: positive = more buy pressure
+    imbalance = (bid_size - ask_size) / (bid_size + ask_size)
+
+    # Spread as % of mid
+    mid = (bid + ask) / 2
+    spread_pct = (ask - bid) / mid if mid > 0 else 0
+
+    # Imbalance interpretation
+    if imbalance > 0.15:
+        signal = 'bullish'
+    elif imbalance < -0.15:
+        signal = 'bearish'
+    else:
+        signal = 'neutral'
+
+    return {
+        'bid_ask_imbalance': imbalance,
+        'spread_pct': spread_pct,
+        'order_flow_signal': signal,
+        'data_quality': 'real'
+    }
+
+
 def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
-    """Fetch everything: quote, bars, technicals, options chain, IV rank.
+    """Fetch everything: quote, bars, technicals, options chain, IV rank, flow analysis.
 
     Single call to get all data needed for trade decision.
     """
@@ -520,6 +640,10 @@ def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
         iv_rank = calculate_iv_rank(ticker)
         iv_rank = validate_and_normalize_iv_rank(iv_rank, context_source="moomoo", ticker=ticker)
 
+        # NEW: Flow analysis for flow debater
+        flow_analysis = analyze_options_flow(chain)
+        depth_analysis = analyze_market_depth(ticker)
+
         return {
             "ticker": ticker,
             "quote": quote,
@@ -527,6 +651,8 @@ def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
             "bars": technicals,
             "options_chain": chain,
             "iv_rank": iv_rank,
+            "flow_analysis": flow_analysis,
+            "depth_analysis": depth_analysis,
             "timestamp": datetime.now().isoformat(),
         }
 

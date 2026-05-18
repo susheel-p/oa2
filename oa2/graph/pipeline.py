@@ -133,6 +133,21 @@ def run(
             ctx.market_data = {"ticker": ticker, "stub": True, "fetch_error": str(e)}
 
     # ------------------------------------------------------------------
+    # L0b — fetch flow data for flow debater (new)
+    # ------------------------------------------------------------------
+    # Wire moomoo or other adapters to populate real flow signals for FlowDebater.
+    # If unavailable, flow_data will be "absent" and FlowDebater abstains cleanly.
+    try:
+        from oa2.dataflows.flow_adapter import auto_adapter
+        flow_adapter = auto_adapter()
+        flow_data = flow_adapter.fetch(ticker, date=as_of)
+        ctx.market_data["flow_data"] = flow_data
+    except Exception as e:
+        import warnings as _warnings
+        _warnings.warn(f"L0b flow data fetch failed: {e}; FlowDebater will abstain")
+        ctx.market_data["flow_data"] = {"data_quality": "absent"}
+
+    # ------------------------------------------------------------------
     # L1 — regime classifier
     # ------------------------------------------------------------------
     if feature_flags.REGIME_CLASSIFIER_ENABLED:
