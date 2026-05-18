@@ -104,6 +104,11 @@ def _write_report(path: Path, content: str) -> None:
     _log(f"Wrote {path}")
 
 
+def _get_day_reports_dir(date_str: str, reports_dir: Path) -> Path:
+    """Get the reports directory for a specific date."""
+    return reports_dir / date_str
+
+
 def _get_yesterday_str(date_str: str | None = None) -> str:
     """Return YYYY-MM-DD string for yesterday."""
     if date_str:
@@ -305,10 +310,11 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
 
     lines.append("## Links")
     lines.append("")
-    lines.append(f"[[{scan_date}-postmarket]] (after market close)")
+    lines.append("[[postmarket]] (after market close)")
     lines.append("")
 
-    report_path = reports_dir / f"{scan_date}-premarket.md"
+    day_dir = _get_day_reports_dir(scan_date, reports_dir)
+    report_path = day_dir / "premarket.md"
     _write_report(report_path, "\n".join(lines))
 
 
@@ -403,10 +409,11 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
 
     lines.append("## Links")
     lines.append("")
-    lines.append(f"[[{report_date}-premarket]] (pre-market setup)")
+    lines.append("[[premarket]] (pre-market setup)")
     lines.append("")
 
-    report_path = reports_dir / f"{report_date}-postmarket.md"
+    day_dir = _get_day_reports_dir(report_date, reports_dir)
+    report_path = day_dir / "postmarket.md"
     _write_report(report_path, "\n".join(lines))
 
 
@@ -544,10 +551,11 @@ def generate_trade_doc(trade_id: str, date_str: str | None = None, log_dir: Path
 
     lines.append("## Links")
     lines.append("")
-    lines.append(f"[[{doc_date}-premarket]] | [[{doc_date}-postmarket]]")
+    lines.append("[[../premarket]] | [[../postmarket]]")
     lines.append("")
 
-    report_path = reports_dir / "trades" / f"{doc_date}-{ticker}-{trade_id[:4]}.md"
+    day_dir = _get_day_reports_dir(doc_date, reports_dir)
+    report_path = day_dir / "trades" / f"{ticker}-{trade_id[:4]}.md"
     _write_report(report_path, "\n".join(lines))
 
 
