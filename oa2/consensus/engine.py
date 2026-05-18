@@ -1,38 +1,62 @@
-"""Consensus engine — GLS aggregation of debater opinions with correlation-aware weighting.
+"""Consensus engine — heteroscedastic GLS aggregation of debater opinions.
 
-Phase A3: The correlation matrix is now sourced from EWMACovariance (rolling EWMA
-over the debater opinion log) when OA2_FLAG_EWMA_CORR is enabled. When the EWMA
-tracker has insufficient observations (< 20 per debater) it transparently falls
-back to the hardcoded _fixed_correlation() values. This gives a smooth transition
-from cold-start to data-driven correlations.
+Algorithm
+---------
+Each debater produces a signed score o_i ∈ [−1, 1] (direction × conviction).
+We model these as noisy observations of the true consensus direction c:
+
+    o_i = c + ε_i,   Cov(ε) = Σ
+
+The noise covariance is built from two sources:
+
+  * Correlation structure (C):  how much pairs of debaters co-move.
+    Source: EWMA live estimates (Phase A3) when warm; hardcoded priors otherwise.
+
+  * Per-debater noise variance (σ_i²):  how certain each debater is.
+    σ_i = max(NOISE_FLOOR, 1 − |o_i|).
+    A debater who says BULLISH×0.95 has σ = 0.05 (low noise, high precision).
+    A NEUTRAL debater always has σ = 1.0 (no signal, minimal influence).
+
+Full covariance:  Σ_ij = C_ij · σ_i · σ_j   (heteroscedastic correlation model)
+Ridge:            Σ_r   = Σ + λI               (prevents singular matrix; λ = 1e-3)
+Precision:        Ω     = Σ_r⁻¹                (numpy.linalg.inv)
+
+GLS estimator (BLUE):
+    ĉ = (1ᵀ Ω 1)⁻¹ · 1ᵀ Ω o = Σ w_i o_i
+where w_i = (Ω·1)_i / (1ᵀ·Ω·1)  — row sums of Ω, normalised to sum to 1.
+
+N_eff = 1 / Σ w_i²  (Herfindahl ESS; equals N when all weights are equal,
+                      falls as correlation or conviction concentration increases)
+
+Phase A3:  If OA2_FLAG_EWMA_CORR=1 and the EWMA tracker has ≥ 20 observations
+           per debater, live EWMA correlations replace the hardcoded priors.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+import numpy as np
 
 from oa2.consensus.state import Consensus, Direction
 from oa2.debaters.base import DebaterOpinion
 
+_RIDGE_LAMBDA = 1e-3   # ridge regularisation added to diagonal of Σ before inversion
+_NOISE_FLOOR = 0.05    # minimum σ_i; prevents zero-variance debaters collapsing Ω
+
 
 class ConsensusEngine:
-    """Aggregates debater opinions into a single consensus direction.
+    """Aggregates debater opinions into a single consensus direction via GLS.
 
-    Uses Generalized Least Squares (GLS) weighting to account for correlation
-    between debaters. Debaters that agree more strongly get higher weights;
-    debaters with high noise (low conviction) get discounted.
+    High-conviction debaters receive higher GLS weights (lower noise → higher
+    precision).  Correlated debater pairs are down-weighted: if two debaters
+    are highly correlated their combined vote counts as less than two independent
+    sources — exactly what the inverse of a correlation matrix expresses.
 
     Correlation source (Phase A3):
-    - If OA2_FLAG_EWMA_CORR=1 (default True) and the EWMA tracker is warm,
-      use live EWMA correlations computed from the debater opinion log.
-    - Otherwise fall back to hardcoded _fixed_correlation() priors.
-
-    Outputs:
-    - direction: BULLISH, BEARISH, or NEUTRAL
-    - score: [0, 1] — strength of consensus (0.5 = no consensus)
-    - n_eff: effective sample size (accounting for correlation)
-    - p_bull: calibrated probability of bullish direction
-    - weights: final GLS weight per debater
+    - OA2_FLAG_EWMA_CORR=1 (default True) + tracker warm → live EWMA correlations.
+    - Otherwise → hardcoded _fixed_correlation() priors.
     """
 
     def __init__(
@@ -41,18 +65,110 @@ class ConsensusEngine:
         prior_weights: dict[str, float] | None = None,
         covariance_tracker=None,
     ):
-        """Initialize consensus engine.
+        """Initialise the consensus engine.
 
         Args:
-            regime: optional regime string for regime-aware weighting
-            prior_weights: optional prior weights from Phase 4 bandit
-            covariance_tracker: optional EWMACovariance instance (Phase A3).
-                When None, loads from disk if OA2_FLAG_EWMA_CORR enabled,
-                otherwise uses hardcoded _fixed_correlation().
+            regime:           Optional regime string for regime-aware weighting.
+            prior_weights:    Optional bandit prior weights (Phase 4).
+            covariance_tracker: Optional EWMACovariance instance (Phase A3).
+                When None, loads from disk if OA2_FLAG_EWMA_CORR enabled.
         """
         self.regime = regime
         self.prior_weights = prior_weights
         self._covariance_tracker = covariance_tracker
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def aggregate(self, opinions: list[DebaterOpinion]) -> Consensus:
+        """Aggregate debater opinions into a single consensus.
+
+        Args:
+            opinions: list of DebaterOpinion objects (typically 5–6).
+
+        Returns:
+            Consensus with direction, score ∈ [0,1], n_eff, p_bull, and weights.
+        """
+        if not opinions:
+            return self._neutral_consensus()
+
+        # Step 1: convert opinions to signed scores o_i ∈ [−1, 1]
+        opinion_vectors = self._vectorize_opinions(opinions)
+
+        # Step 2: build NxN correlation matrix (EWMA or fixed priors)
+        corr_matrix = self._compute_correlation_matrix(opinion_vectors)
+
+        # Step 3: compute GLS weights via proper matrix inversion
+        weights = self._compute_gls_weights(opinion_vectors, corr_matrix)
+
+        # Step 4 (Phase 4): blend with bandit prior weights when available
+        if self.prior_weights:
+            blended = {
+                name: weights[name] * self.prior_weights.get(name, 1.0)
+                for name in weights
+            }
+            total = sum(blended.values())
+            weights = (
+                {k: v / total for k, v in blended.items()}
+                if total > 1e-10
+                else {op.debater_name: 1.0 / len(opinions) for op in opinions}
+            )
+
+        # Step 5: weighted consensus score ĉ ∈ [−1, 1]
+        raw_score = sum(weights[name] * opinion_vectors[name] for name in opinion_vectors)
+
+        # Step 6: effective sample size N_eff = 1 / Σ w_i²
+        n_eff = self._compute_n_eff(weights)
+
+        # Step 7: direction threshold (±0.10 dead-band for NEUTRAL)
+        if raw_score > 0.10:
+            direction = Direction.BULLISH
+        elif raw_score < -0.10:
+            direction = Direction.BEARISH
+        else:
+            direction = Direction.NEUTRAL
+
+        # Step 8: calibrated p_bull
+        p_bull = self._calibrate_probability(raw_score, n_eff)
+
+        # Step 9: normalise raw score to [0, 1] for the score field
+        normalised_score = (raw_score + 1.0) / 2.0
+
+        return Consensus(
+            direction=direction,
+            score=normalised_score,
+            n_eff=n_eff,
+            p_bull=p_bull,
+            weights=weights,
+            corr_matrix=corr_matrix if self.regime else None,
+        )
+
+    # ------------------------------------------------------------------
+    # Step 1 — vectorisation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _vectorize_opinions(opinions: list[DebaterOpinion]) -> dict[str, float]:
+        """Convert DebaterOpinion objects to signed numeric scores.
+
+        BULLISH × conviction  →  +conviction
+        BEARISH × conviction  →  −conviction
+        NEUTRAL               →   0.0  (conviction ignored — no directional signal)
+        """
+        vectors: dict[str, float] = {}
+        for op in opinions:
+            if op.direction == "BULLISH":
+                vectors[op.debater_name] = op.conviction
+            elif op.direction == "BEARISH":
+                vectors[op.debater_name] = -op.conviction
+            else:
+                vectors[op.debater_name] = 0.0
+        return vectors
+
+    # ------------------------------------------------------------------
+    # Step 2 — correlation matrix
+    # ------------------------------------------------------------------
 
     def _get_covariance_tracker(self):
         """Lazy-load the EWMA covariance tracker once per engine instance."""
@@ -71,137 +187,40 @@ class ConsensusEngine:
 
         return self._covariance_tracker
 
-    def aggregate(self, opinions: list[DebaterOpinion]) -> Consensus:
-        """Aggregate debater opinions into consensus.
+    def _compute_correlation_matrix(
+        self, opinion_vectors: dict[str, float]
+    ) -> dict[str, dict[str, float]]:
+        """Build the NxN correlation matrix C with diagonal 1.
 
-        Args:
-            opinions: list of 5 DebaterOpinion objects
-
-        Returns:
-            Consensus with direction, score, N_eff, p_bull, and weights
-        """
-        if not opinions:
-            return self._neutral_consensus()
-
-        # Convert opinions to numeric scores [-1, 0, 1]
-        opinion_vectors = self._vectorize_opinions(opinions)
-
-        # Compute correlation matrix between debater opinions
-        corr_matrix = self._compute_correlation_matrix(opinion_vectors)
-
-        # Compute inverse covariance (precision) matrix
-        precision_matrix = self._invert_correlation(corr_matrix)
-
-        # Compute GLS weights
-        weights = self._compute_gls_weights(opinion_vectors, precision_matrix)
-
-        # Normalize weights to [0, 1]
-        total_weight = sum(weights.values())
-        if total_weight > 0:
-            weights = {k: v / total_weight for k, v in weights.items()}
-        else:
-            weights = {op.debater_name: 0.2 for op in opinions}  # equal weight fallback
-
-        # Phase 4: blend with bandit prior weights if available
-        if self.prior_weights:
-            blended = {}
-            for name in weights:
-                prior = self.prior_weights.get(name, 1.0)  # default prior = 1.0 (neutral)
-                blended[name] = weights[name] * prior
-            # Renormalize
-            blend_total = sum(blended.values())
-            if blend_total > 0:
-                weights = {k: v / blend_total for k, v in blended.items()}
-
-        # Compute weighted consensus score
-        consensus_score = self._compute_consensus_score(opinion_vectors, weights)
-
-        # Compute effective sample size (N_eff = sum(weights)^2 / sum(weights^2))
-        n_eff = self._compute_n_eff(weights)
-
-        # Determine direction
-        if consensus_score > 0.1:
-            direction = Direction.BULLISH
-        elif consensus_score < -0.1:
-            direction = Direction.BEARISH
-        else:
-            direction = Direction.NEUTRAL
-
-        # Compute calibrated probability of bullish
-        p_bull = self._calibrate_probability(consensus_score, n_eff)
-
-        # Normalize consensus score to [0, 1]
-        normalized_score = (consensus_score + 1.0) / 2.0  # maps [-1, 1] to [0, 1]
-
-        return Consensus(
-            direction=direction,
-            score=normalized_score,
-            n_eff=n_eff,
-            p_bull=p_bull,
-            weights=weights,
-            corr_matrix=corr_matrix if self.regime else None,  # only include for debugging
-        )
-
-    @staticmethod
-    def _vectorize_opinions(opinions: list[DebaterOpinion]) -> dict[str, float]:
-        """Convert opinion objects to numeric vectors.
-
-        BULLISH + conviction → +conviction
-        BEARISH + conviction → -conviction
-        NEUTRAL → 0 (ignore conviction)
-
-        Returns dict of {debater_name: score in [-1, 1]}
-        """
-        vectors = {}
-        for op in opinions:
-            if op.direction == "BULLISH":
-                score = op.conviction
-            elif op.direction == "BEARISH":
-                score = -op.conviction
-            else:  # NEUTRAL
-                score = 0.0
-
-            vectors[op.debater_name] = score
-
-        return vectors
-
-    def _compute_correlation_matrix(self, opinion_vectors: dict[str, float]) -> dict[str, dict[str, float]]:
-        """Compute correlation matrix between debater opinions.
-
-        Phase A3: Uses EWMA live correlations when tracker is warm and
-        OA2_FLAG_EWMA_CORR is enabled. Falls back to hardcoded priors
-        transparently when data is insufficient (< 20 observations per debater).
-
-        Returns NxN correlation matrix where N = len(opinion_vectors)
+        Phase A3: uses live EWMA estimates when the tracker is warm for both
+        debaters; falls back to hardcoded priors otherwise.
         """
         names = list(opinion_vectors.keys())
         tracker = self._get_covariance_tracker()
 
-        # Update tracker with current opinions (so each run contributes to future estimates)
         if tracker is not None:
             tracker.update_batch(opinion_vectors)
 
-        # Build correlation matrix: use EWMA if warm, else hardcoded fallback
-        corr = {}
-        for name1 in names:
-            corr[name1] = {}
-            for name2 in names:
-                if name1 == name2:
-                    corr[name1][name2] = 1.0
-                elif tracker is not None and tracker.is_warm([name1, name2]):
-                    corr[name1][name2] = tracker.correlation(name1, name2)
+        corr: dict[str, dict[str, float]] = {}
+        for n1 in names:
+            corr[n1] = {}
+            for n2 in names:
+                if n1 == n2:
+                    corr[n1][n2] = 1.0
+                elif tracker is not None and tracker.is_warm([n1, n2]):
+                    corr[n1][n2] = tracker.correlation(n1, n2)
                 else:
-                    corr[name1][name2] = ConsensusEngine._fixed_correlation(name1, name2)
+                    corr[n1][n2] = ConsensusEngine._fixed_correlation(n1, n2)
 
         return corr
 
     @staticmethod
     def _fixed_correlation(name1: str, name2: str) -> float:
-        """Fallback hardcoded correlation between debater pairs.
+        """Hardcoded prior correlation between known debater pairs.
 
         Used when EWMA tracker has insufficient observations (< 20 per debater).
-        These are prior assumptions, not empirically validated.
-        Phase A3 replaces these with live EWMA estimates as data accumulates.
+        These are domain priors, not empirically validated values.
+        Phase A3 replaces them with live EWMA estimates as data accumulates.
         """
         pairs = {
             frozenset(["directional", "income"]): 0.40,
@@ -215,139 +234,119 @@ class ConsensusEngine:
             frozenset(["volatility", "sentiment"]): 0.15,
             frozenset(["flow", "sentiment"]): 0.10,
         }
+        return pairs.get(frozenset([name1, name2]), 0.20)
 
-        key = frozenset([name1, name2])
-        return pairs.get(key, 0.20)  # default low correlation
+    # ------------------------------------------------------------------
+    # Step 3 — GLS precision matrix and weights
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def _invert_correlation(corr_matrix: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
-        """Compute inverse (precision) matrix from correlation matrix.
+    def _build_precision_matrix(
+        opinion_vectors: dict[str, float],
+        corr_matrix: dict[str, dict[str, float]],
+    ) -> tuple[np.ndarray, list[str]]:
+        """Build and invert the heteroscedastic GLS covariance matrix.
 
-        For small 5x5 matrices, use simplified approach:
-        Precision ≈ (I - ρ * ones) where ρ is avg off-diagonal correlation.
+        Per-debater noise:
+            σ_i = max(NOISE_FLOOR, 1 − |o_i|)
+
+        A debater saying BULLISH×0.95 has σ = 0.05 (very certain).
+        A NEUTRAL debater always has σ = 1.0 (no directional signal).
+
+        Full covariance:  Σ_ij = C_ij · σ_i · σ_j
+        Ridge-stabilised: Σ_r = Σ + λI
+        Precision:        Ω   = Σ_r⁻¹   (numpy.linalg.inv — exact for N ≤ ~30)
+
+        The ridge penalty λ = 1e-3 is negligible relative to the covariance
+        entries (which are O(σ²) with σ ≥ 0.05) but prevents singular matrices
+        when all debaters are perfectly correlated or have zero variance.
+
+        Returns:
+            Ω (ndarray, shape N×N) and the ordered list of debater names.
         """
-        names = list(corr_matrix.keys())
+        names = list(opinion_vectors.keys())
         n = len(names)
 
-        # Compute average off-diagonal correlation
-        avg_rho = 0.0
-        count = 0
-        for name1 in names:
-            for name2 in names:
-                if name1 != name2:
-                    avg_rho += corr_matrix[name1][name2]
-                    count += 1
+        sigma = np.array(
+            [max(_NOISE_FLOOR, 1.0 - abs(opinion_vectors[name])) for name in names],
+            dtype=float,
+        )
 
-        if count > 0:
-            avg_rho /= count
-        else:
-            avg_rho = 0.0
+        C = np.array(
+            [[corr_matrix[n1][n2] for n2 in names] for n1 in names],
+            dtype=float,
+        )
 
-        # Simplified inverse: (I - ρ * ones)^-1
-        # For corr matrix with constant off-diag ρ:
-        # inv[i][i] ≈ (1 + (n-1)*ρ)^-1 + (n-1)*ρ*(1 + (n-1)*ρ)^-2
-        # inv[i][j] ≈ -ρ*(1 + (n-1)*ρ)^-2
-        denom = 1.0 + (n - 1) * avg_rho
-        if denom > 1e-6:
-            diag = 1.0 / denom
-            off_diag = -avg_rho / (denom * denom)
-        else:
-            diag = 1.0
-            off_diag = 0.0
+        Sigma = C * np.outer(sigma, sigma)
+        Sigma_ridge = Sigma + _RIDGE_LAMBDA * np.eye(n)
+        Omega = np.linalg.inv(Sigma_ridge)
 
-        precision = {}
-        for name1 in names:
-            precision[name1] = {}
-            for name2 in names:
-                if name1 == name2:
-                    precision[name1][name2] = diag
-                else:
-                    precision[name1][name2] = off_diag
-
-        return precision
+        return Omega, names
 
     @staticmethod
     def _compute_gls_weights(
-        opinion_vectors: dict[str, float], precision_matrix: dict[str, dict[str, float]]
+        opinion_vectors: dict[str, float],
+        corr_matrix: dict[str, dict[str, float]],
     ) -> dict[str, float]:
-        """Compute GLS weights from precision matrix.
+        """Compute GLS weights: w_i ∝ (Ω·1)_i.
 
-        GLS weight ∝ sum_j precision[i][j] * opinion[j]
+        The BLUE (Best Linear Unbiased Estimator) weights are proportional to
+        the row sums of the precision matrix Ω.  They depend only on the
+        covariance structure, not on the current opinions.
 
-        High conviction opinions with low noise (high precision) get higher weights.
+        Weights are clipped to ≥ 0 (small negatives can arise numerically from
+        near-zero convictions) then normalised to sum to 1.
         """
-        weights = {}
-        names = list(opinion_vectors.keys())
+        Omega, names = ConsensusEngine._build_precision_matrix(
+            opinion_vectors, corr_matrix
+        )
 
-        for name1 in names:
-            weight = 0.0
-            for name2 in names:
-                weight += precision_matrix[name1][name2] * abs(opinion_vectors[name2])
-            weights[name1] = max(weight, 0.0)  # non-negative weights
+        ones = np.ones(len(names))
+        row_sums = Omega @ ones          # (Ω·1) — precision-weighted importance per debater
+        row_sums = np.maximum(row_sums, 0.0)
 
-        return weights
-
-    @staticmethod
-    def _compute_consensus_score(
-        opinion_vectors: dict[str, float], weights: dict[str, float]
-    ) -> float:
-        """Compute weighted consensus score in [-1, 1].
-
-        Consensus = sum(weights[i] * opinion[i]) / sum(weights[i])
-        """
-        numerator = sum(weights.get(name, 0.0) * opinion_vectors[name] for name in opinion_vectors)
-        denominator = sum(weights.values())
-
-        if denominator > 1e-6:
-            return numerator / denominator
+        total = row_sums.sum()
+        if total < 1e-10:
+            weights_arr = np.ones(len(names)) / len(names)
         else:
-            # Fallback: equal weight average
-            return sum(opinion_vectors.values()) / len(opinion_vectors)
+            weights_arr = row_sums / total
+
+        return {name: float(w) for name, w in zip(names, weights_arr)}
+
+    # ------------------------------------------------------------------
+    # Derived statistics
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _compute_n_eff(weights: dict[str, float]) -> float:
-        """Compute effective sample size N_eff.
+        """Effective sample size: N_eff = 1 / Σ w_i²   (Herfindahl ESS).
 
-        N_eff = (sum weights)^2 / sum(weights^2)
-
-        If all weights equal: N_eff = N (perfect independence)
-        If weights highly skewed: N_eff < 1 (single dominant opinion)
+        Equal weights of 1/N → N_eff = N  (full independence).
+        One dominant weight of 1 → N_eff = 1.
+        High correlation or conviction concentration both reduce N_eff.
         """
-        sum_w = sum(weights.values())
         sum_w2 = sum(w * w for w in weights.values())
-
-        if sum_w2 > 1e-6:
-            n_eff = (sum_w * sum_w) / sum_w2
-        else:
-            n_eff = len(weights)
-
-        return n_eff
+        return 1.0 / sum_w2 if sum_w2 > 1e-10 else float(len(weights))
 
     @staticmethod
-    def _calibrate_probability(consensus_score: float, n_eff: float) -> float:
-        """Calibrate probability of bullish from consensus score and N_eff.
+    def _calibrate_probability(raw_score: float, n_eff: float) -> float:
+        """Calibrate probability of bullish from raw consensus score and N_eff.
 
-        p_bull = sigmoid(consensus_score * n_eff)
+        p_bull = sigmoid(raw_score × n_eff × 2)
 
-        Higher N_eff amplifies the consensus score.
-        Low N_eff (correlated opinions) reduces confidence.
+        N_eff amplifies the signal: N independent agreements are more
+        informative than N correlated ones.
         """
-
-        def sigmoid(x: float) -> float:
-            if x > 100:
-                return 1.0
-            elif x < -100:
-                return 0.0
-            else:
-                import math
-
-                return 1.0 / (1.0 + math.exp(-x))
-
-        return sigmoid(consensus_score * n_eff * 2.0)  # * 2.0 to boost signal
+        x = raw_score * n_eff * 2.0
+        if x > 100:
+            return 1.0
+        if x < -100:
+            return 0.0
+        return 1.0 / (1.0 + math.exp(-x))
 
     @staticmethod
     def _neutral_consensus() -> Consensus:
-        """Return neutral consensus when no opinions available."""
+        """Return a neutral consensus when no opinions are provided."""
         return Consensus(
             direction=Direction.NEUTRAL,
             score=0.5,

@@ -104,14 +104,20 @@ class TestConsensusEngine:
         assert consensus.p_bull < 0.20
 
     def test_mixed_opinions_with_weights(self, sample_opinions):
-        """Mixed opinions → weighted consensus."""
+        """Mixed opinions → weighted consensus.
+
+        With conviction-scaled GLS the high-conviction directional debater
+        (BULLISH×0.75, σ=0.25) receives the largest weight and pulls the
+        normalised score toward 0.8–0.9.  The old bound of <0.8 was tuned
+        to the previous broken algorithm (scalar-collapsed precision).
+        """
         engine = ConsensusEngine()
         consensus = engine.aggregate(sample_opinions)
 
         # 3 bullish (0.75, 0.65, 0.60), 1 bearish (0.40), 1 neutral (0.50)
-        # Weighted average should be bullish but not extreme
+        # Weighted average should be bullish; not unanimous (score < 1.0)
         assert consensus.direction == Direction.BULLISH
-        assert 0.5 < consensus.score < 0.8
+        assert 0.5 < consensus.score < 1.0
         assert consensus.n_eff > 1.0
 
     def test_consensus_has_all_weights(self, sample_opinions):
