@@ -430,8 +430,13 @@ class MoomooFlowAdapter(FlowAdapterBase):
             flow_analysis = snapshot.get("flow_analysis", {})
             depth_analysis = snapshot.get("depth_analysis", {})
 
+            # DEBUG: Log what we got
+            import logging as _logging
+            _log = _logging.getLogger("oa2.flow_adapter")
+            _log.warning(f"[{ticker}] Flow analysis: quality={flow_analysis.get('data_quality')}, pcr={flow_analysis.get('put_call_ratio')}, call_conc={flow_analysis.get('call_vol_concentration'):.1f}%, put_conc={flow_analysis.get('put_vol_concentration'):.1f}%")
+
             # Populate FlowData from moomoo analysis
-            if flow_analysis.get("data_quality") == "real":
+            if flow_analysis.get("data_quality") in ("real", "partial"):
                 fd.put_call_ratio = flow_analysis.get("put_call_ratio")
 
                 # Detect unusual volume concentration (>65% in top 3 strikes = concentrated/unusual)
@@ -454,6 +459,8 @@ class MoomooFlowAdapter(FlowAdapterBase):
                     fd.unusual_call_vol = True
                 if put_gamma_conc > 60:
                     fd.unusual_put_vol = True
+
+                _log.info(f"[{ticker}] FlowData populated: pcr={fd.put_call_ratio}, sweeps=({fd.call_sweep_count},{fd.put_sweep_count}), unusual=({fd.unusual_call_vol},{fd.unusual_put_vol})")
 
             # Depth analysis for order flow imbalance
             if depth_analysis.get("data_quality") == "real":
