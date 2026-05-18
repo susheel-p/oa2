@@ -85,12 +85,14 @@ def _run_command(cmd: list[str], label: str) -> bool:
 
 
 class MarketMonitor:
-    """Daemon that schedules full-scan and exit-only operations."""
+    """Daemon that schedules full-scan, exit-only, and report generation."""
 
     def __init__(self, dry_run: bool = False, once: bool = False):
         self.dry_run = dry_run
         self.once = once
         self.full_scan_done_today = False
+        self.premarket_done_today = False
+        self.postmarket_done_today = False
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
 
@@ -127,10 +129,42 @@ class MarketMonitor:
         cmd = self._build_cmd("exit-only")
         _run_command(cmd, "EXIT-ONLY")
 
+    def _run_premarket_report(self) -> None:
+        """Generate premarket report at 8:30 AM."""
+        with self.lock:
+            if self.premarket_done_today:
+                return
+
+        now = _now_et()
+        _log(f"Premarket report trigger at {now.strftime('%H:%M:%S')} (target 08:30:00)")
+
+        cmd = [sys.executable, "scripts/report.py", "--premarket"]
+        if _run_command(cmd, "PREMARKET-REPORT"):
+            with self.lock:
+                self.premarket_done_today = True
+                _log("Premarket report generated")
+
+    def _run_postmarket_report(self) -> None:
+        """Generate postmarket report at 4:15 PM."""
+        with self.lock:
+            if self.postmarket_done_today:
+                return
+
+        now = _now_et()
+        _log(f"Postmarket report trigger at {now.strftime('%H:%M:%S')} (target 16:15:00)")
+
+        cmd = [sys.executable, "scripts/report.py", "--postmarket"]
+        if _run_command(cmd, "POSTMARKET-REPORT"):
+            with self.lock:
+                self.postmarket_done_today = True
+                _log("Postmarket report generated")
+
     def _reset_daily_flags(self) -> None:
         """Reset daily flags at midnight."""
         with self.lock:
             self.full_scan_done_today = False
+            self.premarket_done_today = False
+            self.postmarket_done_today = False
 
     def _schedule_loop(self) -> None:
         """Main scheduling loop."""
@@ -147,6 +181,14 @@ class MarketMonitor:
                 self._reset_daily_flags()
                 last_daily_reset = now.date()
 
+            # Check for premarket report at 8:30 AM
+            if (
+                now.hour == 8
+                and now.minute == 30
+                and _is_market_day()
+            ):
+                self._run_premarket_report()
+
             # Check for full-scan at 9:35 AM
             if (
                 now.hour == 9
@@ -158,6 +200,14 @@ class MarketMonitor:
             # Run exit-only every minute during market hours
             if _is_market_open():
                 self._run_exit_only()
+
+            # Check for postmarket report at 4:15 PM
+            if (
+                now.hour == 16
+                and now.minute == 15
+                and _is_market_day()
+            ):
+                self._run_postmarket_report()
 
             if self.once:
                 break
