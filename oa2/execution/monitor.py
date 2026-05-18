@@ -159,6 +159,82 @@ class OpenPosition:
             "age_days": round(self.age_days, 1),
         }
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to JSON-compatible dict."""
+        return {
+            "trade_id": self.trade_id,
+            "ticker": self.ticker,
+            "underlying": self.underlying,
+            "structure": self.structure,
+            "direction": self.direction,
+            "entry_price": self.entry_price,
+            "entry_premium": self.entry_premium,
+            "entry_time": self.entry_time,
+            "entry_regime": self.entry_regime,
+            "entry_dte": self.entry_dte,
+            "contracts": self.contracts,
+            "max_profit_per_contract": self.max_profit_per_contract,
+            "max_loss_per_contract": self.max_loss_per_contract,
+            "stop_loss_pct": self.stop_loss_pct,
+            "profit_target_pct": self.profit_target_pct,
+            "delta": self.delta,
+            "vega": self.vega,
+            "theta": self.theta,
+            "current_pnl": self.current_pnl,
+            "current_underlying_price": self.current_underlying_price,
+            "current_dte": self.current_dte,
+            "legs": [
+                {
+                    "underlying": l.underlying,
+                    "expiry": l.expiry.isoformat(),
+                    "strike": l.strike,
+                    "right": l.right,
+                    "side": l.side,
+                    "contracts": l.contracts,
+                }
+                for l in self.legs
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "OpenPosition":
+        """Deserialize from JSON-compatible dict."""
+        legs = [
+            Leg(
+                underlying=l["underlying"],
+                expiry=_dt.date.fromisoformat(l["expiry"]),
+                strike=l["strike"],
+                right=l["right"],
+                side=l["side"],
+                contracts=l["contracts"],
+            )
+            for l in d.get("legs", [])
+        ]
+        return cls(
+            trade_id=d["trade_id"],
+            ticker=d["ticker"],
+            underlying=d["underlying"],
+            structure=d["structure"],
+            direction=d["direction"],
+            entry_price=d["entry_price"],
+            entry_premium=d["entry_premium"],
+            entry_time=d["entry_time"],
+            entry_regime=d["entry_regime"],
+            entry_dte=d["entry_dte"],
+            contracts=d["contracts"],
+            max_profit_per_contract=d["max_profit_per_contract"],
+            max_loss_per_contract=d["max_loss_per_contract"],
+            stop_loss_pct=d.get("stop_loss_pct", 1.0),
+            profit_target_pct=d.get("profit_target_pct", 0.5),
+            delta=d.get("delta", 0.0),
+            vega=d.get("vega", 0.0),
+            theta=d.get("theta", 0.0),
+            current_pnl=d.get("current_pnl", 0.0),
+            current_underlying_price=d.get("current_underlying_price", 0.0),
+            current_dte=d.get("current_dte", 0),
+            legs=legs,
+        )
+
 
 class PositionMonitor:
     """In-memory registry of open positions.
@@ -343,3 +419,22 @@ class PositionMonitor:
             "net_pnl": round(self.net_pnl(), 2),
             "positions": [p.summary() for p in positions],
         }
+
+    def save(self, path: str) -> None:
+        """Persist all open positions to JSON file."""
+        import json
+        from pathlib import Path
+        data = [p.to_dict() for p in self._positions.values()]
+        Path(path).write_text(json.dumps(data, indent=2))
+
+    @classmethod
+    def load(cls, path: str, clock: Clock | None = None) -> "PositionMonitor":
+        """Load open positions from JSON file into a new monitor."""
+        import json
+        from pathlib import Path
+        monitor = cls(clock=clock)
+        if Path(path).exists():
+            data = json.loads(Path(path).read_text())
+            for d in data:
+                monitor.add(OpenPosition.from_dict(d))
+        return monitor

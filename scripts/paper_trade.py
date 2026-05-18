@@ -1,14 +1,17 @@
 """oa2 automated paper trading runner.
 
-Fully autonomous — no human intervention required. Run once per day
-(or on a schedule) to scan all 22 tickers, log signals, check open
-position exits, write a daily summary, and push everything to GitHub.
+Two modes:
+  --full-scan   Run debaters → consensus → sizing → save positions (daily at 9:35 AM)
+  --exit-only   Load positions → fetch quotes → check exits → log locally (every 1 min)
+
+All logs stay local (logs/ directory). No GitHub push.
 
 Usage:
-    python scripts/paper_trade.py                  # full run, all flags on
-    python scripts/paper_trade.py --dry-run        # scan only, no GitHub push
-    python scripts/paper_trade.py --tickers SPY QQQ  # subset of tickers
-    python scripts/paper_trade.py --account-size 100000
+    python scripts/paper_trade.py --full-scan               # daily entry scan
+    python scripts/paper_trade.py --exit-only               # intraday exit checks
+    python scripts/paper_trade.py --full-scan --dry-run     # test full-scan
+    python scripts/paper_trade.py --exit-only --dry-run     # test exit monitor
+    python scripts/paper_trade.py --tickers SPY QQQ         # scan subset only
 
 Environment variables (all default ON for paper trading):
     OA2_FLAG_DEBATERS=1
@@ -18,14 +21,12 @@ Environment variables (all default ON for paper trading):
     OA2_FLAG_BANDIT=1
     OA2_FLAG_SIZING=1
     OA2_FLAG_EXIT=1
-    GITHUB_TOKEN=<your token>   (optional — skip push if absent)
-    OA2_ACCOUNT_SIZE=50000      (override account size)
+    OA2_ACCOUNT_SIZE=50000      (override account size, default $50,000)
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
 import datetime
 import json
 import os
@@ -54,7 +55,6 @@ from oa2.sizing.limits import GreeksBook
 from oa2.watchlist.builder import WATCHLIST
 
 ET = ZoneInfo("America/New_York")
-REPO = "susheel-p/oa2"
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
 
@@ -85,69 +85,96 @@ def _is_market_day() -> bool:
 
 
 # =============================================================================
-# GitHub push
+# Exit-only mode (intraday monitoring)
 # =============================================================================
 
-def _github_push(files: dict[str, str], commit_msg: str) -> bool:
-    """Push one or more files to GitHub via API.
+def _run_exit_only(account_size: float, dry_run: bool) -> None:
+    """Load today's positions, fetch fresh quotes, run exit engine, log alerts."""
+    import yfinance as yf
 
-    Args:
-        files: {path_in_repo: file_content_string}
-        commit_msg: commit message
+    from oa2.execution.exit import ExitEngine
+    from oa2.execution.monitor import PositionMonitor
 
-    Returns True on success, False on any failure.
-    """
+    today = _today_str()
+    positions_path = LOG_DIR / f"positions_{today}.json"
+
+    if not positions_path.exists():
+        _log("No open positions file found — run --full-scan first.")
+        return
+
+    monitor = PositionMonitor.load(positions_path)
+    positions = list(monitor.open_positions.values()) if monitor.open_positions else []
+
+    if not positions:
+        _log("No open positions to monitor.")
+        return
+
+    _log(f"Checking {len(positions)} open position(s) ...")
+
+    # Fetch fresh quotes via yfinance (single batch call)
+    tickers = list({p.underlying for p in positions})
+    quotes = {}
     try:
-        import urllib.request
-        token = os.environ.get("GITHUB_TOKEN", "")
-        if not token:
-            _log("GITHUB_TOKEN not set — skipping push.")
-            return False
-
-        # Get current master HEAD
-        def _api(method: str, path: str, body: dict | None = None) -> dict:
-            url = f"https://api.github.com/repos/{REPO}/{path}"
-            data = json.dumps(body).encode() if body else None
-            req = urllib.request.Request(
-                url, data=data, method=method,
-                headers={
-                    "Authorization": f"token {token}",
-                    "Accept": "application/vnd.github+json",
-                    "Content-Type": "application/json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                return json.loads(resp.read())
-
-        head = _api("GET", "git/ref/heads/master")["object"]["sha"]
-        base_tree = _api("GET", f"git/commits/{head}")["tree"]["sha"]
-
-        tree_items = []
-        for repo_path, content in files.items():
-            blob = _api("POST", "git/blobs", {
-                "content": base64.b64encode(content.encode()).decode(),
-                "encoding": "base64",
-            })
-            tree_items.append({
-                "path": repo_path,
-                "mode": "100644",
-                "type": "blob",
-                "sha": blob["sha"],
-            })
-
-        new_tree = _api("POST", "git/trees", {"base_tree": base_tree, "tree": tree_items})
-        new_commit = _api("POST", "git/commits", {
-            "message": commit_msg,
-            "tree": new_tree["sha"],
-            "parents": [head],
-        })
-        _api("PATCH", "git/refs/heads/master", {"sha": new_commit["sha"]})
-        _log(f"Pushed to GitHub: {new_commit['sha'][:7]} — {commit_msg}")
-        return True
-
+        data = yf.download(tickers, period="1d", progress=False)
+        for t in tickers:
+            try:
+                if len(tickers) == 1:
+                    quotes[t] = float(data["Close"].dropna().iloc[-1])
+                else:
+                    quotes[t] = float(data["Close"][t].dropna().iloc[-1])
+            except Exception:
+                pass
     except Exception as exc:
-        _log(f"GitHub push failed: {exc}")
-        return False
+        _log(f"Quote fetch failed: {exc}")
+
+    engine = ExitEngine()
+    alerts = []
+    now_et = _now_et()
+    context = {"current_time": now_et}
+
+    for pos in positions:
+        fresh_price = quotes.get(pos.underlying)
+        if fresh_price:
+            # Simple PnL re-mark: delta approximation
+            price_move = fresh_price - pos.entry_price
+            approx_pnl = pos.delta * price_move * pos.contracts
+            monitor.mark_to_market(
+                pos.trade_id,
+                current_pnl=approx_pnl,
+                current_underlying_price=fresh_price,
+                current_dte=pos.current_dte,
+            )
+            pos = monitor.get(pos.trade_id)  # get updated object
+
+        decision = engine.evaluate(pos, context)
+        if decision.fired:
+            alert = {
+                "ts": _ts(),
+                "trade_id": pos.trade_id,
+                "ticker": pos.ticker,
+                "should_exit": decision.should_exit,
+                "needs_review": decision.needs_review,
+                "reason": decision.reason.value if decision.reason else None,
+                "urgency": decision.urgency.value if decision.urgency else None,
+                "detail": decision.detail,
+                "current_pnl": decision.current_pnl,
+                "current_dte": decision.current_dte,
+            }
+            alerts.append(alert)
+            urgency = (decision.urgency.value if decision.urgency else "").upper()
+            _log(
+                f"  EXIT ALERT [{urgency}] {pos.ticker} {pos.trade_id}: "
+                f"{decision.detail}"
+            )
+
+    # Log alerts locally (don't push to GitHub — too frequent, too expensive)
+    alerts_path = LOG_DIR / f"exit_alerts_{today}.jsonl"
+    with open(alerts_path, "a") as f:
+        for alert in alerts:
+            f.write(json.dumps(alert) + "\n")
+            f.flush()
+
+    _log(f"Exit check done: {len(alerts)} alert(s) written to {alerts_path}")
 
 
 # =============================================================================
@@ -230,7 +257,11 @@ def _build_summary(results: list[dict], account_size: float, book: GreeksBook) -
 def main() -> None:
     parser = argparse.ArgumentParser(description="oa2 automated paper trading runner")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Scan all tickers but do not push to GitHub")
+                        help="Test mode: log to console, do not write files")
+    parser.add_argument("--full-scan", action="store_true",
+                        help="Run full entry scan (default if no --exit-only)")
+    parser.add_argument("--exit-only", action="store_true",
+                        help="Check exits on open positions only; no debaters/consensus")
     parser.add_argument("--tickers", nargs="*", default=None,
                         help="Override ticker list (default: all 22)")
     parser.add_argument("--account-size", type=float,
@@ -244,6 +275,11 @@ def main() -> None:
     if args.skip_weekend and not _is_market_day():
         _log("Weekend — skipping run.")
         sys.exit(0)
+
+    # Dispatch: exit-only mode or full-scan mode
+    if args.exit_only:
+        _run_exit_only(account_size=args.account_size, dry_run=args.dry_run)
+        return
 
     tickers = args.tickers if args.tickers else WATCHLIST
     account_size = args.account_size
@@ -290,6 +326,10 @@ def main() -> None:
             if n_exits:
                 _log(f"    ⚠ {n_exits} exit alert(s) for open positions")
 
+    # ── Save open positions for exit monitor ──────────────────────────────────
+    positions_path = LOG_DIR / f"positions_{today}.json"
+    monitor.save(positions_path)
+
     # ── Build and write daily summary ─────────────────────────────────────────
     summary = _build_summary(results, account_size, book)
     summary_path = LOG_DIR / f"summary_{today}.json"
@@ -302,22 +342,6 @@ def main() -> None:
          f"{summary['exit_alert_count']} exit alerts")
     _log(f"Logs: {log_path}")
     _log(f"Summary: {summary_path}")
-
-    # ── Push to GitHub ────────────────────────────────────────────────────────
-    if not args.dry_run:
-        _log("Pushing logs to GitHub ...")
-        files_to_push = {
-            f"logs/paper_trade_{today}.jsonl": log_path.read_text(),
-            f"logs/summary_{today}.json": summary_path.read_text(),
-        }
-        _github_push(
-            files_to_push,
-            commit_msg=f"paper trade {today}: "
-                       f"{summary['approved_count']} approved, "
-                       f"{summary['exit_alert_count']} exit alerts",
-        )
-    else:
-        _log("Dry run — GitHub push skipped.")
 
     _log("=" * 60)
 
