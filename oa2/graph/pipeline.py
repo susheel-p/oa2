@@ -16,17 +16,20 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from oa2.consensus.calibration import Calibrator, default_calibrator_path
 from oa2.consensus.engine import ConsensusEngine
 from oa2.core import feature_flags
+from oa2.core.clock import Clock, SystemClock
 from oa2.dealer.agent import DealerAgent
 from oa2.debaters.runner import DebaterEnsemble
 from oa2.execution.exit import ExitEngine
-from oa2.execution.monitor import PositionMonitor
+from oa2.execution.monitor import ChainProvider, PositionMonitor
 from oa2.performance.bandit import BanditEngine
 from oa2.regime.classifier import RegimeClassifier
 from oa2.sizing.cvar import CVaRChecker
 from oa2.sizing.kelly import size_from_consensus
 from oa2.sizing.limits import GreeksBook
+from oa2.sizing.mc_cvar import MonteCarloCVaR
 
 _DEFAULT_ACCOUNT_SIZE = 50_000.0
 
@@ -63,6 +66,9 @@ def run(
     account_size: float = _DEFAULT_ACCOUNT_SIZE,
     book: GreeksBook | None = None,
     monitor: PositionMonitor | None = None,
+    clock: Clock | None = None,
+    chain_provider: ChainProvider | None = None,
+    calibrator: Calibrator | None = None,
 ) -> PipelineContext:
     """End-to-end pipeline for one ticker.
 
@@ -98,6 +104,13 @@ def run(
 
     if book is None:
         book = GreeksBook(account_size=account_size)
+    if clock is None:
+        clock = SystemClock()
+    if calibrator is None:
+        try:
+            calibrator = Calibrator.load(default_calibrator_path())
+        except Exception:
+            calibrator = Calibrator()
 
     # ------------------------------------------------------------------
     # L0 — market data
@@ -184,11 +197,21 @@ def run(
 
         consensus_engine = ConsensusEngine(regime=regime_id, prior_weights=bandit_weights)
         ctx.consensus = consensus_engine.aggregate(ctx.debater_opinions)
+
+        # P0#2: calibrate p_bull before it reaches Kelly. Identity mode when
+        # untrained — see oa2/consensus/calibration.py.
+        raw_p_bull = ctx.consensus.p_bull
+        calibrated_p_bull = calibrator.transform(raw_p_bull)
+        ctx.consensus.p_bull = calibrated_p_bull
+
         ctx.attribution["consensus"] = {
             "direction": ctx.consensus.direction.value,
             "score": ctx.consensus.score,
             "n_eff": ctx.consensus.n_eff,
-            "p_bull": ctx.consensus.p_bull,
+            "p_bull": calibrated_p_bull,
+            "p_bull_raw": raw_p_bull,
+            "calibrator_mode": calibrator.state.mode,
+            "calibrator_n_samples": calibrator.state.n_samples,
             "weights": ctx.consensus.weights,
         }
     else:
@@ -216,7 +239,17 @@ def run(
             ctx.attribution["exit_rules"] = ctx.exit_rules
 
         if monitor is not None:
-            alerts = _check_open_positions(ctx, monitor)
+            # P0#4: re-mark Greeks against the live chain before exit checks,
+            # so stop / DTE / regime-flip rules read fresh exposures, not
+            # entry-time snapshots.
+            if chain_provider is not None:
+                try:
+                    skipped = monitor.remark_greeks(chain_provider)
+                    if skipped:
+                        ctx.attribution["remark_skipped_trade_ids"] = skipped
+                except Exception as e:
+                    ctx.attribution["remark_error"] = str(e)
+            alerts = _check_open_positions(ctx, monitor, clock=clock)
             ctx.open_position_exits = alerts
             if alerts:
                 ctx.attribution["open_position_exit_alerts"] = alerts
@@ -386,7 +419,61 @@ def _run_sizing(
         # Re-fetch limit_check for headroom reporting at the reduced size
         limit_check = limit_recheck
 
-    # All three gates passed
+    # --- Gate B3b: Monte Carlo CVaR (P0#3) ---
+    # The scenario stress above is a coarse pre-check. Real CVaR is computed
+    # here via N-path MC with fat-tail returns and IV shocks.
+    gamma_per = float(md.get("gamma_per_contract", 0.0))
+    mc = MonteCarloCVaR(account_size=account_size, rng_seed=0)
+    mc_result = mc.check(
+        delta=delta_per, gamma=gamma_per, vega=vega_per, theta=theta_per,
+        price=price, contracts=final_contracts,
+        book_delta=book.net_delta, book_vega=book.net_vega,
+    )
+    mc_diag = {
+        "mode": mc_result.mode,
+        "n_paths": mc_result.n_paths,
+        "var_loss": mc_result.var_loss,
+        "cvar_loss": mc_result.cvar_loss,
+        "worst_pnl": mc_result.worst_pnl,
+        "budget_dollars": mc_result.budget_dollars,
+    }
+    if not mc_result.approved:
+        reduced = mc.max_contracts_within_budget(
+            delta=delta_per, gamma=gamma_per, vega=vega_per, theta=theta_per,
+            price=price, requested=final_contracts,
+            book_delta=book.net_delta, book_vega=book.net_vega,
+        )
+        if reduced == 0:
+            return {
+                "approved": False,
+                "reject_gate": "mc_cvar",
+                "reject_reason": mc_result.reject_reason,
+                "contracts": 0,
+                "kelly": kelly_diag,
+                "cvar": cvar_diag,
+                "mc_cvar": mc_diag,
+            }
+        # Re-verify book limits at the reduced size
+        limit_recheck = book.check_proposed(
+            delta=delta_per * reduced,
+            vega=vega_per * reduced,
+            theta=theta_per * reduced,
+            underlying=ctx.ticker,
+        )
+        if not limit_recheck.approved:
+            return {
+                "approved": False,
+                "reject_gate": "book_limits_after_mc_cvar_reduction",
+                "reject_reason": limit_recheck.reject_reason,
+                "contracts": 0,
+                "kelly": kelly_diag,
+                "cvar": cvar_diag,
+                "mc_cvar": mc_diag,
+            }
+        final_contracts = reduced
+        limit_check = limit_recheck
+
+    # All four gates passed
     kelly_diag["final_contracts"] = final_contracts
 
     return {
@@ -404,6 +491,7 @@ def _run_sizing(
             "theta_headroom": round(limit_check.theta_headroom, 2),
         },
         "cvar": cvar_diag,
+        "mc_cvar": mc_diag,
     }
 
 
@@ -439,6 +527,7 @@ def _build_exit_rules(ctx: PipelineContext) -> dict[str, Any]:
 def _check_open_positions(
     ctx: PipelineContext,
     monitor: PositionMonitor,
+    clock: Clock | None = None,
 ) -> list[dict[str, Any]]:
     """Run exit engine against all open positions for this ticker.
 
@@ -456,7 +545,7 @@ def _check_open_positions(
     if ctx.consensus is not None:
         exit_context["consensus_direction"] = ctx.consensus.direction.value
 
-    engine = ExitEngine()
+    engine = ExitEngine(clock=clock)
     decisions = engine.exits_required(positions, context=exit_context)
 
     return [
