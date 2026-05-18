@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from oa2.debaters.base import DebaterBase, DebaterOpinion, Direction
+from oa2.debaters.base import DebaterBase, DebaterOpinion, Direction, TradeQuality
 
 
 _LONG_VEGA = {
@@ -111,35 +111,39 @@ class VolatilityDebater(DebaterBase):
             term_upward,       # Contango = normal
         ])
 
-        # Decision logic
+        # Volatility debater is a trade-quality voter on vega alignment with
+        # vol regime. It has no view on underlying *price* direction —
+        # `direction` is always NEUTRAL; the real vote is `trade_quality`.
+        direction = Direction.NEUTRAL
+
         if trade_is_long_vega and vol_expansion_signals >= 2:
             # Long vega in expansion regime — ideal
             conviction = 0.45 + vol_expansion_signals * 0.12
-            direction = Direction.BULLISH
+            trade_quality = TradeQuality.APPROVE
             reasoning = f"Vol expansion signals ({vol_expansion_signals}/6) support long vega. RV/IV {rv_iv:.2f}, IV rank {iv_rank*100:.0f}%."
 
         elif trade_is_short_vega and vol_expansion_signals >= 2:
             # Short vega in expansion regime — dangerous
             conviction = 0.70
-            direction = Direction.BEARISH
+            trade_quality = TradeQuality.REJECT
             reasoning = f"Vol expansion signals ({vol_expansion_signals}/6) are elevated. Selling vega here is risky."
 
         elif trade_is_short_vega and vol_compression_signals >= 3:
             # Short vega in compression regime — acceptable
             conviction = 0.55 + vol_compression_signals * 0.05
-            direction = Direction.NEUTRAL
+            trade_quality = TradeQuality.APPROVE
             reasoning = f"Vol compression signals ({vol_compression_signals}/4) support premium selling. RV/IV {rv_iv:.2f}."
 
         elif trade_is_long_vega and vol_compression_signals >= 3:
             # Long vega in compression regime — bad
             conviction = 0.65
-            direction = Direction.BEARISH
+            trade_quality = TradeQuality.REJECT
             reasoning = f"Vol compression regime ({vol_compression_signals}/4) opposes long vega. IV rank {iv_rank*100:.0f}% is expensive."
 
         else:
             # Mixed signals
             conviction = 0.35
-            direction = Direction.NEUTRAL
+            trade_quality = TradeQuality.ABSTAIN
             reasoning = f"Vol signals mixed ({vol_expansion_signals} expansion vs {vol_compression_signals} compression)."
 
         conviction = min(max(conviction, 0.0), 0.95)
@@ -166,4 +170,5 @@ class VolatilityDebater(DebaterBase):
             conviction=round(conviction, 3),
             reasoning=reasoning,
             signals_used=signals,
+            trade_quality=trade_quality,
         )

@@ -82,65 +82,65 @@ def fetch_with_cache(ticker: str, date: str) -> dict:
     import os
     import warnings
 
-    # ── Data fetch: try moomoo (quotes + bars), fallback to yfinance for options ──
+    # C1 fix: moomoo's fetch_market_snapshot() has no `date` parameter — it
+    # always returns the live snapshot. Using it for a historical `date`
+    # silently scores backtests against current-market data. Gate it: only
+    # call moomoo when the requested date is today.
+    today_iso = datetime.date.today().isoformat()
+    is_live_date = (date == today_iso)
+
+    # ── Data fetch: try moomoo (live only), fallback to yfinance for history ──
     ctx = None
-    try:
-        from oa2.dataflows.moomoo_data import fetch_market_snapshot
-        snapshot = fetch_market_snapshot(ticker)
+    if is_live_date:
+        try:
+            from oa2.dataflows.moomoo_data import fetch_market_snapshot
+            snapshot = fetch_market_snapshot(ticker)
 
-        if snapshot and "error" not in snapshot:
-            # Build context dict from moomoo snapshot
-            quote = snapshot.get("quote", {})
-            latest = snapshot.get("latest_candle", {})
-            chain = snapshot.get("options_chain", {})
+            if snapshot and "error" not in snapshot:
+                quote = snapshot.get("quote", {})
+                latest = snapshot.get("latest_candle", {})
+                chain = snapshot.get("options_chain", {})
 
-            ctx = {
-                "ticker": ticker,
-                "date": date,
-                "current_price": quote.get("last_price", 0.0),
-                "open_price": latest.get("open", 0.0),
-                "high_price": latest.get("high", 0.0),
-                "low_price": latest.get("low", 0.0),
-                "volume": quote.get("volume", 0),
-                "bid": quote.get("bid", 0.0),
-                "ask": quote.get("ask", 0.0),
-                "bid_size": quote.get("bid_size", 0),
-                "ask_size": quote.get("ask_size", 0),
-                # Technicals (from moomoo bars)
-                "ema_20": latest.get("ema_20", 0.0),
-                "ema_50": latest.get("ema_50", 0.0),
-                "ema_200": latest.get("ema_200", 0.0),
-                "rsi_14": latest.get("rsi_14", 0.0),
-                "atr_14": latest.get("atr_14", 0.0),
-                "vwap": latest.get("vwap", 0.0),
-                "realized_vol": latest.get("realized_vol", 0.0),
-                # IV & Options
-                "iv_rank": snapshot.get("iv_rank", 50.0),
-                "iv_percentile": snapshot.get("iv_percentile", 50.0),
-                # Options chain summary
-                "calls_count": len(chain.get("calls", [])),
-                "puts_count": len(chain.get("puts", [])),
-                "atm_strike": chain.get("atm_strike", 0.0),
-                # Raw chain for strategy selector
-                "_options_chain": chain,
-                "_market_snapshot": snapshot,
-                "data_source": "moomoo",
-                "fetched_at": __import__("datetime").datetime.utcnow().isoformat(),
-            }
+                ctx = {
+                    "ticker": ticker,
+                    "date": date,
+                    "current_price": quote.get("last_price", 0.0),
+                    "open_price": latest.get("open", 0.0),
+                    "high_price": latest.get("high", 0.0),
+                    "low_price": latest.get("low", 0.0),
+                    "volume": quote.get("volume", 0),
+                    "bid": quote.get("bid", 0.0),
+                    "ask": quote.get("ask", 0.0),
+                    "bid_size": quote.get("bid_size", 0),
+                    "ask_size": quote.get("ask_size", 0),
+                    "ema_20": latest.get("ema_20", 0.0),
+                    "ema_50": latest.get("ema_50", 0.0),
+                    "ema_200": latest.get("ema_200", 0.0),
+                    "rsi_14": latest.get("rsi_14", 0.0),
+                    "atr_14": latest.get("atr_14", 0.0),
+                    "vwap": latest.get("vwap", 0.0),
+                    "realized_vol": latest.get("realized_vol", 0.0),
+                    "iv_rank": snapshot.get("iv_rank", 50.0),
+                    "iv_percentile": snapshot.get("iv_percentile", 50.0),
+                    "calls_count": len(chain.get("calls", [])),
+                    "puts_count": len(chain.get("puts", [])),
+                    "atm_strike": chain.get("atm_strike", 0.0),
+                    "_options_chain": chain,
+                    "_market_snapshot": snapshot,
+                    "data_source": "moomoo",
+                    "fetched_at": datetime.datetime.utcnow().isoformat(),
+                }
 
-            # Calculate term structure if multiple expirations available
-            ctx["term_structure"] = {
-                "front_month_iv": 0.0,  # Would need multiple expirations to compute
-                "back_month_iv": 0.0,
-            }
+                ctx["term_structure"] = {
+                    "front_month_iv": 0.0,
+                    "back_month_iv": 0.0,
+                }
+                ctx["skew_put_iv"] = 0.0
+                ctx["skew_call_iv"] = 0.0
 
-            # Placeholder for skew (would need to extract from chain)
-            ctx["skew_put_iv"] = 0.0
-            ctx["skew_call_iv"] = 0.0
-
-    except Exception as e:
-        warnings.warn(f"moomoo data fetch failed ({e}); using yfinance fallback")
-        ctx = None
+        except Exception as e:
+            warnings.warn(f"moomoo data fetch failed ({e}); using yfinance fallback")
+            ctx = None
 
     # ── Fallback to yfinance if moomoo unavailable ─────────────────────────────
     if ctx is None:

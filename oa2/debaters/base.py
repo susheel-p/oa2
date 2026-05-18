@@ -16,28 +16,46 @@ from typing import Any
 
 
 class Direction(str, Enum):
-    """Trade direction opinion."""
+    """Directional view on the *underlying* (BULL/BEAR/NEUTRAL).
+
+    This is strictly a view on price direction — not a vote on whether the
+    proposed trade is a good idea. See `TradeQuality` for that channel.
+    """
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
     NEUTRAL = "NEUTRAL"
+
+
+class TradeQuality(str, Enum):
+    """Debater's verdict on the *proposed trade structure*.
+
+    Separated from `Direction` so that a vote like "selling premium here is
+    ideal" (which is a trade-quality APPROVE, not a directional BULLISH)
+    does not pollute directional consensus.
+    """
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+    ABSTAIN = "ABSTAIN"
 
 
 @dataclass
 class DebaterOpinion:
     """Structured output from each debater.
 
-    Attributes:
-        debater_name: e.g., "directional", "income", "volatility", "flow", "sentiment", "dealer"
-        direction: BULLISH, BEARISH, or NEUTRAL
-        conviction: float in [0, 1], magnitude of confidence in direction
-        reasoning: short string explaining the opinion
-        signals_used: dict of {signal_name: signal_value} for attribution
+    Two independent channels:
+      - `direction`: view on underlying price direction (consumed by GLS direction consensus)
+      - `trade_quality`: verdict on the proposed structure (consumed separately, not by GLS)
+
+    A debater that has no directional view (income/volatility judging trade
+    quality only) MUST emit `direction=NEUTRAL` and put its real vote on
+    `trade_quality`. Conviction applies to whichever channel is non-neutral.
     """
     debater_name: str
     direction: Direction
     conviction: float
     reasoning: str
     signals_used: dict[str, Any]
+    trade_quality: TradeQuality = TradeQuality.ABSTAIN
 
     def signed_score(self) -> float:
         """Return conviction scaled by direction: +conviction if BULLISH, -conviction if BEARISH, 0 if NEUTRAL."""

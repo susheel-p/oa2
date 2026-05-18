@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from oa2.debaters.base import DebaterBase, DebaterOpinion, Direction
+from oa2.debaters.base import DebaterBase, DebaterOpinion, Direction, TradeQuality
 
 
 _PREMIUM_SELLERS = {
@@ -85,35 +85,39 @@ class IncomeDebater(DebaterBase):
         iv_is_cheap = iv_rank < 0.35
         rv_exceeds_iv = rv_iv > 1.10
 
-        # Decision logic
+        # Income debater is purely a trade-quality voter — it has no view on
+        # underlying direction. `direction` is always NEUTRAL; the real vote
+        # lives on `trade_quality`.
+        direction = Direction.NEUTRAL
+
         if trade_sells_premium and iv_is_expensive and not rv_exceeds_iv:
             # Ideal: selling rich premium in quiet vol regime
             conviction = 0.65 + (iv_rank - 0.60) * 0.5
-            direction = Direction.BULLISH
+            trade_quality = TradeQuality.APPROVE
             reasoning = f"IV Rank {iv_rank*100:.0f}% is expensive. Selling premium in quiet regime is ideal. {proposed_structure} earns theta."
 
         elif trade_buys_premium and iv_is_expensive:
             # Worst: buying expensive premium
             conviction = 0.70
-            direction = Direction.BEARISH
+            trade_quality = TradeQuality.REJECT
             reasoning = f"IV Rank {iv_rank*100:.0f}% is expensive. Buying premium at high IV rank means overpaying for decay."
 
         elif trade_sells_premium and rv_exceeds_iv:
             # Dangerous: selling when actual moves exceed implied
             conviction = 0.65
-            direction = Direction.BEARISH
+            trade_quality = TradeQuality.REJECT
             reasoning = f"RV/IV {rv_iv:.2f} — realized moves exceeding implied. Selling premium here is risky."
 
         elif trade_buys_premium and iv_is_cheap and rv_exceeds_iv:
             # Favorable for vol buyer; income trader admits it
             conviction = 0.30
-            direction = Direction.BULLISH
+            trade_quality = TradeQuality.APPROVE
             reasoning = f"IV Rank {iv_rank*100:.0f}% is cheap. Buying premium is justified if RV stays elevated."
 
         else:
             # Moderate / mixed
             conviction = 0.40
-            direction = Direction.NEUTRAL
+            trade_quality = TradeQuality.ABSTAIN
             reasoning = f"IV Rank {iv_rank*100:.0f}%, RV/IV {rv_iv:.2f} — no strong income edge."
 
         conviction = min(max(conviction, 0.30), 0.95)
@@ -136,4 +140,5 @@ class IncomeDebater(DebaterBase):
             conviction=round(conviction, 3),
             reasoning=reasoning,
             signals_used=signals,
+            trade_quality=trade_quality,
         )

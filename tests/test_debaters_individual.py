@@ -9,7 +9,7 @@ Each test verifies:
 
 import pytest
 
-from oa2.debaters.base import Direction
+from oa2.debaters.base import Direction, TradeQuality
 from oa2.debaters.directional import DirectionalDebater
 from oa2.debaters.income import IncomeDebater
 from oa2.debaters.volatility import VolatilityDebater
@@ -172,7 +172,10 @@ class TestIncomeDebater:
         debater = IncomeDebater()
         opinion = debater.debate(context)
 
-        assert opinion.direction == Direction.BULLISH
+        # C8/C9: income debater no longer overloads `direction` with trade-quality.
+        # Direction is NEUTRAL (no view on underlying); the real vote is on trade_quality.
+        assert opinion.direction == Direction.NEUTRAL
+        assert opinion.trade_quality == TradeQuality.APPROVE
         assert opinion.conviction >= 0.65  # High conviction for ideal setup
         assert opinion.signals_used["iv_is_expensive"] is True
 
@@ -193,7 +196,8 @@ class TestIncomeDebater:
         debater = IncomeDebater()
         opinion = debater.debate(context)
 
-        assert opinion.direction == Direction.BEARISH
+        assert opinion.direction == Direction.NEUTRAL
+        assert opinion.trade_quality == TradeQuality.REJECT
         assert opinion.conviction >= 0.70  # Strong conviction AGAINST
         assert opinion.signals_used["trade_buys_premium"] is True
 
@@ -234,7 +238,8 @@ class TestIncomeDebater:
         debater = IncomeDebater()
         opinion = debater.debate(context)
 
-        assert opinion.direction == Direction.BEARISH
+        assert opinion.direction == Direction.NEUTRAL
+        assert opinion.trade_quality == TradeQuality.REJECT
         assert opinion.conviction >= 0.65
         assert opinion.signals_used["rv_exceeds_iv"] is True
 
@@ -299,7 +304,9 @@ class TestVolatilityDebater:
         debater = VolatilityDebater()
         opinion = debater.debate(context)
 
-        assert opinion.direction == Direction.BULLISH
+        # C8/C9: volatility debater is a trade-quality voter — direction is NEUTRAL.
+        assert opinion.direction == Direction.NEUTRAL
+        assert opinion.trade_quality == TradeQuality.APPROVE
         assert opinion.conviction >= 0.45
         assert opinion.signals_used["vol_expansion_signals"] >= 2
 
@@ -325,7 +332,8 @@ class TestVolatilityDebater:
         debater = VolatilityDebater()
         opinion = debater.debate(context)
 
-        assert opinion.direction == Direction.BEARISH
+        assert opinion.direction == Direction.NEUTRAL
+        assert opinion.trade_quality == TradeQuality.REJECT
         assert opinion.conviction >= 0.70
         assert opinion.signals_used["vol_expansion_signals"] >= 2
 

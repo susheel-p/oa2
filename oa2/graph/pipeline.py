@@ -102,10 +102,22 @@ def run(
     # ------------------------------------------------------------------
     # L0 — market data
     # ------------------------------------------------------------------
+    # C13 fix: when no context_dict is injected (live mode), actually fetch
+    # via the dataflows cache instead of running with a stub. The cache
+    # internally gates moomoo to live dates and falls back to yfinance for
+    # historical replay (see dataflows/cache.py C1 gating).
     if context_dict:
         ctx.market_data = context_dict.copy()
     else:
-        ctx.market_data = {"ticker": ticker, "stub": True}
+        try:
+            import datetime as _dt
+            from oa2.dataflows.cache import fetch_with_cache
+            fetch_date = as_of or _dt.date.today().isoformat()
+            ctx.market_data = fetch_with_cache(ticker, fetch_date)
+        except Exception as e:
+            import warnings as _warnings
+            _warnings.warn(f"L0 fetch failed for {ticker} ({e}); pipeline running with stub context")
+            ctx.market_data = {"ticker": ticker, "stub": True, "fetch_error": str(e)}
 
     # ------------------------------------------------------------------
     # L1 — regime classifier
