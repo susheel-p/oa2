@@ -51,11 +51,17 @@ class BanditEngine:
         total = sum(raw.values()) or 1.0
         return {name: weight / total for name, weight in raw.items()}
 
-    def update(self, debater_name: str, regime_id: int, *, hit: bool) -> None:
-        """Update Beta posterior for (debater, regime) after trade outcome."""
+    def update(self, debater_name: str, regime_id: int, *, hit: bool, decay: float = 1.0) -> None:
+        """Update Beta posterior for (debater, regime) after trade outcome with optional decay."""
         key = (debater_name, regime_id)
         if key not in self._posteriors:
             self._posteriors[key] = BetaPosterior()
+        
+        # Apply exponential decay to the current posterior parameters above the prior
+        if decay < 1.0:
+            self._posteriors[key].alpha = (self._posteriors[key].alpha - 1.0) * decay + 1.0
+            self._posteriors[key].beta = (self._posteriors[key].beta - 1.0) * decay + 1.0
+
         if hit:
             self._posteriors[key].alpha += 1.0
         else:

@@ -65,14 +65,15 @@ def _init_status_map() -> None:
 
 
 def _format_option_code(spec: LegSpec, strike_override: float | None = None) -> str:
-    """Moomoo US options code: e.g. US.AAPL230616C00150000
+    """Moomoo US options code: e.g. US.AAPL230616C150000
 
-    YYMMDD + C/P + strike*1000 zero-padded to 8 digits.
+    US. prefix is required by moomoo trade context.
+    YYMMDD + C/P + strike*1000 (no zero-padding).
     """
     yymmdd = spec.expiry.strftime("%y%m%d")
     strike = strike_override if strike_override is not None else spec.strike
     strike_int = int(round(strike * 1000))
-    return f"US.{spec.underlying.upper()}{yymmdd}{spec.right}{strike_int:08d}"
+    return f"US.{spec.underlying.upper()}{yymmdd}{spec.right}{strike_int}"
 
 
 # In-process cache: (underlying, expiry_iso, right) -> sorted list of valid strikes
@@ -225,6 +226,8 @@ class MoomooBroker:
                 trd_env=self._trd_env,
                 acc_id=self._acc_id,
             )
+            import time
+            time.sleep(2.1)
         except Exception as e:
             self._reset()
             return LegFill(leg_id="", status=LegStatus.FAILED, error=f"place_order exception: {e}")

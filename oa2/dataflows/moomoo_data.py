@@ -71,7 +71,21 @@ def _get_quote_context():
             _quote_ctx = ft.OpenQuoteContext(host="127.0.0.1", port=11111)
         except Exception as e:
             raise Exception(f"Failed to connect to OpenD server at 127.0.0.1:11111. Ensure moomoo app is running and OpenD is enabled. Error: {e}")
+        import atexit
+        atexit.register(close_quote_context)
     return _quote_ctx
+
+
+def close_quote_context() -> None:
+    """Close the moomoo quote context so background threads exit on process shutdown."""
+    global _quote_ctx, _subscribed_codes
+    if _quote_ctx is not None:
+        try:
+            _quote_ctx.close()
+        except Exception:
+            pass
+        _quote_ctx = None
+        _subscribed_codes = set()
 
 
 def _ensure_subscribed(code: str, sub_types: list):

@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -313,7 +314,8 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
     lines.append("[[postmarket]] (after market close)")
     lines.append("")
 
-    day_dir = _get_day_reports_dir(scan_date, reports_dir)
+    report_date = date_str if date_str else _today_str()
+    day_dir = _get_day_reports_dir(report_date, reports_dir)
     report_path = day_dir / "premarket.md"
     _write_report(report_path, "\n".join(lines))
 
@@ -415,6 +417,129 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
     day_dir = _get_day_reports_dir(report_date, reports_dir)
     report_path = day_dir / "postmarket.md"
     _write_report(report_path, "\n".join(lines))
+
+    _write_daily_summary_html(
+        day_dir=day_dir,
+        report_date=report_date,
+        scan_records=scan_records,
+        summary_data=summary_data,
+        positions_data=positions_data,
+        exit_alerts=exit_alerts,
+        approved_recs=approved_recs,
+        rejected_recs=rejected_recs,
+    )
+
+
+def _write_daily_summary_html(
+    day_dir: Path,
+    report_date: str,
+    scan_records: list,
+    summary_data: dict,
+    positions_data: list,
+    exit_alerts: list,
+    approved_recs: list,
+    rejected_recs: list,
+) -> None:
+    """Render plain-English HTML combining the day's premarket + postmarket story."""
+    import html as _html
+
+    premarket_md = day_dir / "premarket.md"
+    postmarket_md = day_dir / "postmarket.md"
+    premarket_text = premarket_md.read_text(encoding="utf-8") if premarket_md.exists() else ""
+    postmarket_text = postmarket_md.read_text(encoding="utf-8") if postmarket_md.exists() else ""
+
+    n_scanned = summary_data.get("tickers_scanned", len(scan_records))
+    n_approved = summary_data.get("approved_count", len(approved_recs))
+    n_rejected = summary_data.get("rejected_count", len(rejected_recs))
+    n_exits = summary_data.get("exit_alert_count", len(exit_alerts))
+    n_open = len([p for p in positions_data if isinstance(p, dict)])
+
+    # Plain-English narrative
+    paragraphs = []
+    paragraphs.append(
+        f"Going into the {report_date} session, the scanner reviewed {n_scanned} tickers. "
+        f"Of those, {n_approved} cleared every sizing gate and were approved for trading, "
+        f"while {n_rejected} were turned down — typically by the Kelly sizer, CVaR stress check, "
+        f"or Greek caps."
+    )
+
+    if n_open:
+        tickers = ", ".join(
+            sorted({p.get("ticker", "?") for p in positions_data if isinstance(p, dict)})
+        )
+        paragraphs.append(
+            f"By the close, {n_open} position(s) were on the book: {tickers}."
+        )
+    else:
+        paragraphs.append("By the close, no positions were actually opened on the book.")
+
+    if n_exits:
+        paragraphs.append(
+            f"The exit monitor fired {n_exits} alert(s) during the session — "
+            "see the Exit Events table below for the details and realized P&L."
+        )
+    else:
+        paragraphs.append("The exit monitor stayed quiet — no stop, profit-target, or DTE alerts fired.")
+
+    if rejected_recs:
+        top_reasons: dict[str, int] = {}
+        for r in rejected_recs:
+            reason = (r.get("decision") or {}).get("sizing_reject_reason", "Unknown")
+            top_reasons[reason] = top_reasons.get(reason, 0) + 1
+        top = sorted(top_reasons.items(), key=lambda kv: -kv[1])[:3]
+        reason_str = "; ".join(f"{r} ({n})" for r, n in top)
+        paragraphs.append(f"Most common rejection reasons: {reason_str}.")
+
+    html_parts: list[str] = []
+    html_parts.append("<!doctype html><html><head><meta charset='utf-8'>")
+    html_parts.append(f"<title>Daily Summary — {report_date}</title>")
+    html_parts.append(
+        "<style>"
+        "body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;"
+        "max-width:880px;margin:2rem auto;padding:0 1rem;color:#222;line-height:1.55}"
+        "h1{border-bottom:2px solid #333;padding-bottom:.3rem}"
+        "h2{margin-top:2rem;color:#1a4480}"
+        "pre{background:#f5f5f5;padding:1rem;border-radius:6px;overflow-x:auto;"
+        "white-space:pre-wrap;font-size:.9rem}"
+        ".kpis{display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0}"
+        ".kpi{background:#eef3fb;padding:.5rem 1rem;border-radius:6px}"
+        ".kpi b{display:block;font-size:1.4rem;color:#1a4480}"
+        "</style></head><body>"
+    )
+    html_parts.append(f"<h1>Daily Trading Summary — {_html.escape(report_date)}</h1>")
+    html_parts.append(
+        f"<p><em>Generated {_html.escape(_now_et().strftime('%Y-%m-%d %H:%M:%S %Z'))}.</em></p>"
+    )
+
+    html_parts.append("<div class='kpis'>")
+    for label, val in [
+        ("Scanned", n_scanned), ("Approved", n_approved), ("Rejected", n_rejected),
+        ("Open Positions", n_open), ("Exit Alerts", n_exits),
+    ]:
+        html_parts.append(f"<div class='kpi'><b>{val}</b>{_html.escape(label)}</div>")
+    html_parts.append("</div>")
+
+    html_parts.append("<h2>What happened today</h2>")
+    for p in paragraphs:
+        html_parts.append(f"<p>{_html.escape(p)}</p>")
+
+    html_parts.append("<h2>Premarket setup (plan going in)</h2>")
+    if premarket_text:
+        html_parts.append(f"<pre>{_html.escape(premarket_text)}</pre>")
+    else:
+        html_parts.append("<p><em>No premarket report was generated for this date.</em></p>")
+
+    html_parts.append("<h2>Postmarket recap (what actually happened)</h2>")
+    if postmarket_text:
+        html_parts.append(f"<pre>{_html.escape(postmarket_text)}</pre>")
+    else:
+        html_parts.append("<p><em>No postmarket report was generated for this date.</em></p>")
+
+    html_parts.append("</body></html>")
+
+    out_path = day_dir / "summary.html"
+    out_path.write_text("".join(html_parts), encoding="utf-8")
+    _log(f"Wrote {out_path}")
 
 
 # =============================================================================
@@ -603,4 +728,13 @@ Examples:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        try:
+            from oa2.dataflows.moomoo_data import close_quote_context
+            close_quote_context()
+        except Exception:
+            pass
+        # Moomoo SDK leaves non-daemon background threads alive; force exit.
+        os._exit(0)

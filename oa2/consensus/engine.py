@@ -64,6 +64,7 @@ class ConsensusEngine:
         regime: str | None = None,
         prior_weights: dict[str, float] | None = None,
         covariance_tracker=None,
+        dynamic_deadband: bool = False,
     ):
         """Initialise the consensus engine.
 
@@ -72,10 +73,12 @@ class ConsensusEngine:
             prior_weights:    Optional bandit prior weights (Phase 4).
             covariance_tracker: Optional EWMACovariance instance (Phase A3).
                 When None, loads from disk if OA2_FLAG_EWMA_CORR enabled.
+            dynamic_deadband:  Whether to dynamically widen dead-band based on opinion dispersion.
         """
         self.regime = regime
         self.prior_weights = prior_weights
         self._covariance_tracker = covariance_tracker
+        self.dynamic_deadband = dynamic_deadband
 
     # ------------------------------------------------------------------
     # Public API
@@ -122,9 +125,18 @@ class ConsensusEngine:
         n_eff = self._compute_n_eff(weights)
 
         # Step 7: direction threshold (±0.10 dead-band for NEUTRAL)
-        if raw_score > 0.10:
+        dead_band = 0.10
+        if self.dynamic_deadband and opinion_vectors:
+            # Widen dead-band based on opinion dispersion (disagreement between active debaters)
+            active_scores = [v for v in opinion_vectors.values() if abs(v) > 0.01]
+            if len(active_scores) > 1:
+                dispersion = float(np.std(active_scores))
+                # Base 0.10 scales up by up to 0.10 based on dispersion
+                dead_band += 0.10 * dispersion
+
+        if raw_score > dead_band:
             direction = Direction.BULLISH
-        elif raw_score < -0.10:
+        elif raw_score < -dead_band:
             direction = Direction.BEARISH
         else:
             direction = Direction.NEUTRAL

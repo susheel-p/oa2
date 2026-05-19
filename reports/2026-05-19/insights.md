@@ -1,6 +1,6 @@
 # Daily Trading Insights — 2026-05-19
 
-**KB last updated:** 2026-05-19T10:04:14-04:00
+**KB last updated:** 2026-05-19T13:46:00-04:00
 **Rolling window:** 60 days
 **Outcomes used:** 3690
 

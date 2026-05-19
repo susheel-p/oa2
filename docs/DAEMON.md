@@ -251,6 +251,89 @@ Select-String ERROR logs/daemon.log
 
 ---
 
+## Daemon Health Monitoring (Watchdog)
+
+The daemon runs silently in the background. If it crashes, hangs, or gets stuck, you might not notice until the market closes. The **daemon watchdog** monitors the daemon's heartbeat and sends you Telegram alerts if something goes wrong.
+
+### How It Works
+
+The daemon writes a fresh timestamp every time it completes a scheduling loop. The watchdog script checks this timestamp:
+
+- **If fresh** (within 5 minutes) — daemon is healthy, no alert
+- **If stale or missing** — daemon is down, watchdog sends a Telegram alert
+- **Alert cap** — after 5 alerts, watchdog goes silent (to prevent spam)
+- **Recovery** — when daemon comes back online, watchdog resets and starts fresh
+
+### Setup Watchdog
+
+1. **Verify Telegram is configured** in `.env`:
+   ```
+   TELEGRAM_BOT_TOKEN=your_token_here
+   TELEGRAM_CHAT_ID=your_chat_id_here
+   ```
+
+2. **Add watchdog to Task Scheduler (Windows) or cron (Linux/Mac)**
+
+   **Windows:**
+   - Follow the same steps as daemon setup
+   - Name the task: `oa2-watchdog`
+   - Program: `python`
+   - Arguments: `C:\path\to\oa2-new\scripts\watchdog.py`
+   - Trigger: "Repeat task every 5 minutes, indefinitely" (under Advanced settings)
+
+   **Linux/Mac:**
+   ```bash
+   crontab -e
+   # Add this line:
+   */5 * * * * cd /path/to/oa2-new && python scripts/watchdog.py
+   ```
+
+3. **Optional: Configure watchdog sensitivity** (in `.env`)
+   ```
+   WATCHDOG_STALE_SECONDS=300      # Alert if no heartbeat for 5 min (default)
+   WATCHDOG_MAX_ALERTS=5           # Max alerts before silencing (default)
+   ```
+
+### Test Watchdog
+
+```bash
+# Test one-shot (check daemon health now)
+python scripts/watchdog.py
+
+# Test loop mode (checks every 5 min, useful for debugging)
+python scripts/watchdog.py --loop
+```
+
+### What You'll See
+
+**When daemon is healthy:**
+```
+[OK] Daemon recovered (heartbeat age 0s)
+```
+
+**When daemon is stale:**
+```
+[OK] Alert 1/5 sent: daemon stale (age 330s)
+```
+Telegram message arrives: "oa2 daemon stale (no update for 330s). Check: tail -f logs/daemon.log"
+
+**When max alerts reached:**
+```
+[WARN] Daemon stale (age 600s) — max alerts (5) reached, silencing
+```
+No more alerts until daemon recovers (heartbeat becomes fresh).
+
+### Watchdog State
+
+Watchdog maintains state in `logs/watchdog_state.json`:
+- Tracks how many alerts sent in current outage
+- Tracks when the last alert was sent
+- Resets when daemon recovers
+
+You can delete this file anytime to reset the alert counter.
+
+---
+
 ## Troubleshooting
 
 ### Daemon not starting at boot

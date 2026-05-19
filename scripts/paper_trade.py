@@ -36,6 +36,9 @@ import traceback
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from dotenv import load_dotenv
+load_dotenv()
+
 try:
     from scripts import telegram_notify
 except Exception:
@@ -54,7 +57,7 @@ for _flag in (
     os.environ.setdefault(_flag, "1")
 
 # ── oa2 imports ───────────────────────────────────────────────────────────────
-from oa2.execution.monitor import PositionMonitor
+from oa2.execution.monitor import PositionMonitor, OpenPosition, Leg
 from oa2.graph.pipeline import run as pipeline_run
 from oa2.sizing.limits import GreeksBook
 from oa2.watchlist.builder import WATCHLIST
@@ -180,8 +183,78 @@ def _submit_to_broker(ticker: str, decision: dict, structure_pick: dict) -> list
 
 
 # =============================================================================
-# Exit-only mode (intraday monitoring)
+# Exit-only mode (intraday monitoring) and Broker close helpers
 # =============================================================================
+
+def _close_position_on_broker(pos: OpenPosition) -> list[dict]:
+    """Submit opposite orders to the broker to close the position. Never raises."""
+    from oa2.execution.broker import LegSpec
+    
+    fills: list[dict] = []
+    try:
+        broker = _broker()
+    except Exception as e:
+        return [{"error": f"broker init failed: {e}"}]
+
+    close_id = f"close-{pos.trade_id[:8]}"
+    for i, leg in enumerate(pos.legs):
+        cid = f"{close_id}-{i}"
+        # Reverse side to close:
+        close_side = -leg.side
+        close_leg = LegSpec(
+            underlying=leg.underlying,
+            expiry=leg.expiry,
+            strike=leg.strike,
+            right=leg.right,
+            side=close_side,
+            contracts=leg.contracts * pos.contracts,
+            limit_price=None, # Market order to close
+        )
+        try:
+            fill = broker.submit_leg(cid, close_leg)
+            fills.append({
+                "leg": i, "cid": cid, "side": close_side, "strike": leg.strike,
+                "right": leg.right, "qty": close_leg.contracts,
+                "leg_id": fill.leg_id, "status": fill.status.value,
+                "filled_qty": fill.filled_qty, "avg_fill_price": fill.avg_fill_price,
+                "error": fill.error,
+            })
+        except Exception as e:
+            fills.append({"leg": i, "cid": cid, "error": f"submit close raised: {e}"})
+    return fills
+
+
+def _process_exit_alerts(
+    alerts: list[dict],
+    monitor: PositionMonitor,
+    book: GreeksBook | None,
+    dry_run: bool,
+) -> None:
+    """Submit offsetting close orders for exit alerts, and remove them from monitor/book."""
+    for alert in alerts:
+        if alert.get("should_exit"):
+            trade_id = alert["trade_id"]
+            pos = monitor.get(trade_id)
+            if pos:
+                ticker = pos.ticker
+                _log(f"Executing EXIT for {ticker} ({trade_id}): {alert['reason']}")
+                fills: list[dict] = []
+                if not dry_run and os.getenv("OA2_SUBMIT_ORDERS", "1") != "0":
+                    fills = _close_position_on_broker(pos)
+                    alert["broker_fills"] = fills
+                    for f in fills:
+                        if f.get("error"):
+                            _log(f"  [BROKER EXIT] ERR leg{f.get('leg','?')}: {f['error']}")
+                        else:
+                            _log(
+                                f"  [BROKER EXIT] leg{f['leg']} {('BUY' if f['side']>0 else 'SELL')} "
+                                f"{f['qty']}x {ticker} {f['strike']}{f['right']} "
+                                f"-> {f['status']} (oid={f['leg_id']})"
+                            )
+                monitor.remove(trade_id)
+                if book is not None:
+                    book.remove_position(trade_id)
+
 
 def _run_exit_only(account_size: float, dry_run: bool) -> None:
     """Load today's positions, fetch fresh quotes, run exit engine, log alerts."""
@@ -193,12 +266,23 @@ def _run_exit_only(account_size: float, dry_run: bool) -> None:
     today = _today_str()
     positions_path = LOG_DIR / f"positions_{today}.json"
 
+    # Carry-over logic: load from previous day if today's doesn't exist yet
     if not positions_path.exists():
-        _log("No open positions file found — run --full-scan first.")
-        return
+        positions_files = sorted(LOG_DIR.glob("positions_*.json"))
+        positions_files = [p for p in positions_files if p.name != f"positions_{today}.json"]
+        if positions_files:
+            latest_file = positions_files[-1]
+            _log(f"Carrying over open positions from previous session: {latest_file}")
+            monitor = PositionMonitor.load(latest_file)
+        else:
+            _log("No open positions file found.")
+            return
+        # Save immediately so subsequent checks find it
+        monitor.save(positions_path)
+    else:
+        monitor = PositionMonitor.load(positions_path)
 
-    monitor = PositionMonitor.load(positions_path)
-    positions = list(monitor.open_positions.values()) if monitor.open_positions else []
+    positions = monitor.all_positions()
 
     if not positions:
         _log("No open positions to monitor.")
@@ -262,7 +346,13 @@ def _run_exit_only(account_size: float, dry_run: bool) -> None:
                 f"{decision.detail}"
             )
 
-    # Log alerts locally (don't push to GitHub — too frequent, too expensive)
+    # Process and execute exits if any fired
+    fired_exits = [a for a in alerts if a.get("should_exit")]
+    if fired_exits:
+        _process_exit_alerts(fired_exits, monitor, None, dry_run)
+        monitor.save(positions_path)
+
+    # Log alerts locally
     alerts_path = LOG_DIR / f"exit_alerts_{today}.jsonl"
     with open(alerts_path, "a") as f:
         for alert in alerts:
@@ -314,6 +404,13 @@ def _scan_ticker(
         result["structure_pick"] = (
             ctx.attribution.get("structure_pick", {}) if ctx.attribution else {}
         )
+        # Store pricing/greeks parameters for monitor registration
+        if ctx.market_data:
+            result["entry_price"] = float(ctx.market_data.get("current_price") or ctx.market_data.get("price") or 0.0)
+            result["entry_premium"] = float(ctx.market_data.get("max_loss") or 0.0)
+            result["delta_per_contract"] = float(ctx.market_data.get("delta_per_contract", 0.0))
+            result["vega_per_contract"] = float(ctx.market_data.get("vega_per_contract", 0.0))
+            result["theta_per_contract"] = float(ctx.market_data.get("theta_per_contract", 0.0))
     except Exception as exc:
         result["error"] = traceback.format_exc()
         _log(f"  ERROR scanning {ticker}: {exc}")
@@ -391,17 +488,69 @@ def main() -> None:
 
     # Shared book and monitor across all tickers
     book = GreeksBook(account_size=account_size)
-    monitor = PositionMonitor()
+    
+    # Load open positions from previous day (carry-over logic)
+    positions_path = LOG_DIR / f"positions_{today}.json"
+    if not positions_path.exists():
+        positions_files = sorted(LOG_DIR.glob("positions_*.json"))
+        positions_files = [p for p in positions_files if p.name != f"positions_{today}.json"]
+        if positions_files:
+            latest_file = positions_files[-1]
+            _log(f"Carrying over open positions from previous session: {latest_file}")
+            monitor = PositionMonitor.load(latest_file)
+            for pos in monitor.all_positions():
+                book.add_position(
+                    trade_id=pos.trade_id,
+                    underlying=pos.ticker,
+                    delta=pos.delta,
+                    vega=pos.vega,
+                    theta=pos.theta,
+                    contracts=pos.contracts,
+                )
+        else:
+            _log("No previous open positions found. Starting fresh.")
+            monitor = PositionMonitor()
+    else:
+        monitor = PositionMonitor.load(positions_path)
+        for pos in monitor.all_positions():
+            book.add_position(
+                trade_id=pos.trade_id,
+                underlying=pos.ticker,
+                delta=pos.delta,
+                vega=pos.vega,
+                theta=pos.theta,
+                contracts=pos.contracts,
+            )
 
     # ── Scan all tickers ──────────────────────────────────────────────────────
     results: list[dict] = []
     log_path = LOG_DIR / f"paper_trade_{today}.jsonl"
+    MAX_TICKER_TIME = 300  # 5 min per ticker max before timeout
 
     with open(log_path, "a") as log_file:
         for ticker in tickers:
             _log(f"  Scanning {ticker} ...")
-            result = _scan_ticker(ticker, book, monitor, account_size)
-            results.append(result)
+            start_time = time.time()
+            try:
+                result = _scan_ticker(ticker, book, monitor, account_size)
+                elapsed = time.time() - start_time
+                if elapsed > MAX_TICKER_TIME:
+                    result = {
+                        "ticker": ticker,
+                        "ts": _ts(),
+                        "status": "error",
+                        "error": f"Ticker scan timed out after {elapsed:.1f}s (> {MAX_TICKER_TIME}s)",
+                        "duration_ms": round(elapsed * 1000)
+                    }
+                results.append(result)
+            except Exception as e:
+                results.append({
+                    "ticker": ticker,
+                    "ts": _ts(),
+                    "status": "error",
+                    "error": str(e),
+                    "duration_ms": round((time.time() - start_time) * 1000)
+                })
 
             status = result["status"]
             contracts = (result.get("sizing") or {}).get("contracts", 0)
@@ -426,6 +575,102 @@ def main() -> None:
                                 f"{f['qty']}x {ticker} {f['strike']}{f['right']} "
                                 f"-> {f['status']} (oid={f['leg_id']})"
                             )
+
+                # Construct and register the OpenPosition in monitor and book
+                decision = result.get("decision") or {}
+                struct_pick = result.get("structure_pick") or {}
+                exit_rules = decision.get("exit_rules") or {}
+                regime = result.get("regime") or {}
+
+                trade_id = exit_rules.get("trade_id") or uuid.uuid4().hex[:12]
+
+                # Expiry string parsing
+                import datetime as _dt
+                import uuid
+                expiry_str = struct_pick.get("expiry")
+                expiry = None
+                if expiry_str:
+                    try:
+                        expiry = _dt.date.fromisoformat(expiry_str)
+                    except Exception:
+                        pass
+                if expiry is None:
+                    today_date = _now_et().date()
+                    days_ahead = (4 - today_date.weekday()) % 7 or 7
+                    expiry = today_date + _dt.timedelta(days=days_ahead)
+
+                # Build Legs
+                is_call = "call" in (struct_pick.get("structure") or "").lower()
+                right = "C" if is_call else "P"
+                long_strike = struct_pick.get("long_strike")
+                short_strike = struct_pick.get("short_strike")
+
+                legs = []
+                if long_strike:
+                    legs.append(Leg(
+                        underlying=ticker,
+                        expiry=expiry,
+                        strike=float(long_strike),
+                        right=right,
+                        side=+1,
+                        contracts=1
+                    ))
+                if short_strike:
+                    legs.append(Leg(
+                        underlying=ticker,
+                        expiry=expiry,
+                        strike=float(short_strike),
+                        right=right,
+                        side=-1,
+                        contracts=1
+                    ))
+
+                entry_price = float(result.get("entry_price") or 0.0)
+                entry_premium = float(result.get("entry_premium") or 0.0)
+                entry_regime = int(regime.get("regime_id") or 0)
+                entry_dte = int(struct_pick.get("dte") or 30)
+                max_profit_per = float(struct_pick.get("max_profit") or 0.0)
+                max_loss_per = float(struct_pick.get("max_loss") or 0.0)
+
+                delta = float(result.get("delta_per_contract", 0.0)) * contracts
+                vega = float(result.get("vega_per_contract", 0.0)) * contracts
+                theta = float(result.get("theta_per_contract", 0.0)) * contracts
+
+                pos = OpenPosition(
+                    trade_id=trade_id,
+                    ticker=ticker,
+                    underlying=ticker,
+                    structure=struct_pick.get("structure") or "VERTICAL_CALL_SPREAD",
+                    direction=decision.get("direction") or "BULLISH",
+                    entry_price=entry_price,
+                    entry_premium=entry_premium,
+                    entry_time=time.time(),
+                    entry_regime=entry_regime,
+                    entry_dte=entry_dte,
+                    contracts=contracts,
+                    max_profit_per_contract=max_profit_per,
+                    max_loss_per_contract=max_loss_per,
+                    stop_loss_pct=float(exit_rules.get("stop_loss_pct", 1.0)),
+                    profit_target_pct=float(exit_rules.get("profit_target_pct", 0.5)),
+                    delta=delta,
+                    vega=vega,
+                    theta=theta,
+                    current_pnl=0.0,
+                    current_underlying_price=entry_price,
+                    current_dte=entry_dte,
+                    legs=legs
+                )
+                monitor.add(pos)
+                book.add_position(
+                    trade_id=trade_id,
+                    underlying=ticker,
+                    delta=delta,
+                    vega=vega,
+                    theta=theta,
+                    contracts=contracts,
+                )
+                _log(f"    [MONITOR] Registered new open position {trade_id} for {ticker}")
+
                 if telegram_notify is not None:
                     try:
                         telegram_notify.notify_trade(ticker, result, fills or None)
@@ -442,6 +687,9 @@ def main() -> None:
 
             if n_exits:
                 _log(f"    [!] {n_exits} exit alert(s) for open positions")
+                exits_to_process = [a for a in result.get("exit_alerts", []) if a.get("should_exit")]
+                if exits_to_process:
+                    _process_exit_alerts(exits_to_process, monitor, book, args.dry_run)
 
             # Write result to log AFTER any broker submission so fills are persisted
             log_file.write(json.dumps(result, default=str) + "\n")

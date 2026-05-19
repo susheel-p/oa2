@@ -127,8 +127,9 @@ F4 — Paper cutover gate: v2 Sharpe >= v1 Sharpe on 90-day backtest window.
 | All schemas? | `oa2/core/schemas.py` |
 | Env / paths / OA2_HOME? | `oa2/core/config.py` |
 | Smoke test? | `scripts/smoke_test.py` |
-| Architecture + gap analysis? | `ARCHITECTURE.md` |
-| Full production roadmap? | `ROADMAP.md` |
+| Architecture + gap analysis? | `docs/ARCHITECTURE.md` |
+| Full production roadmap? | `docs/ROADMAP.md` |
+| Documentation index? | `docs/INDEX.md` |
 | Kelly sizing engine? | `oa2/sizing/kelly.py` |
 | Greek hard caps? | `oa2/sizing/limits.py` |
 | CVaR stress check? | `oa2/sizing/cvar.py` |
@@ -139,3 +140,5 @@ F4 — Paper cutover gate: v2 Sharpe >= v1 Sharpe on 90-day backtest window.
 | Bandit warm-start? | `scripts/bandit_warmstart.py` |
 | EWMA covariance? | `oa2/consensus/covariance.py` |
 | Backtest harness? | `scripts/backtest.py` |
+| Daemon setup? | `docs/DAEMON.md` |
+| Daemon health watchdog? | `scripts/watchdog.py` |

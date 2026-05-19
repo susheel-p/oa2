@@ -35,6 +35,8 @@ from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
 
+REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
+
 
 def _now_et() -> datetime.datetime:
     return datetime.datetime.now(ET)
@@ -93,6 +95,8 @@ _TIMEOUTS = {
     "PREMARKET-REPORT": 600,     # 10 min
     "POSTMARKET-REPORT": 600,    # 10 min
     "EXIT-ONLY": 120,            # 2 min — must fit inside the 60s scheduler tick
+    "EOD-OUTCOMES": 600,         # 10 min
+    "DAILY-LEARN": 600,          # 10 min
 }
 
 
@@ -145,6 +149,7 @@ class MarketMonitor:
         self.full_scan_done_today = False
         self.premarket_done_today = False
         self.postmarket_done_today = False
+        self.learning_loop_done_today = False
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
 
@@ -212,22 +217,77 @@ class MarketMonitor:
                 self.postmarket_done_today = True
                 _log("Postmarket report generated", self.log_file)
 
+    def _run_learning_loop(self) -> None:
+        """Run EOD outcomes resolver and daily learner (updates RAG KnowledgeBase + Blacklist)."""
+        with self.lock:
+            if self.learning_loop_done_today:
+                return
+
+        now = _now_et()
+        _log(f"Nightly learning loop trigger at {now.strftime('%H:%M:%S')} (target 17:00:00)", self.log_file)
+
+        # 1. Run outcomes resolver
+        cmd_outcomes = [sys.executable, "scripts/eod_outcomes.py"]
+        if self.dry_run:
+            cmd_outcomes.append("--dry-run")
+        success_outcomes = _run_command(cmd_outcomes, "EOD-OUTCOMES", self.log_file)
+
+        # 2. Run daily learn
+        cmd_learn = [sys.executable, "scripts/daily_learn.py"]
+        if self.dry_run:
+            cmd_learn.append("--dry-run")
+        success_learn = _run_command(cmd_learn, "DAILY-LEARN", self.log_file)
+
+        if success_outcomes and success_learn:
+            with self.lock:
+                self.learning_loop_done_today = True
+                _log("Nightly learning loop completed successfully", self.log_file)
+
     def _reset_daily_flags(self) -> None:
         """Reset daily flags at midnight."""
         with self.lock:
             self.full_scan_done_today = False
             self.premarket_done_today = False
             self.postmarket_done_today = False
+            self.learning_loop_done_today = False
 
     def _schedule_loop(self) -> None:
         """Main scheduling loop."""
         _log("Market monitor started", self.log_file)
+
+        # Setup heartbeat file for watchdog monitoring
+        heartbeat_file = Path(__file__).parent.parent / "logs" / "daemon_heartbeat.txt"
+        heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
 
         last_daily_reset = _now_et().date()
 
         if self.scan_on_start and not self.once:
             _log("Scan-on-start: running full-scan immediately", self.log_file)
             self._run_full_scan()
+
+        # Catch-up: if daemon started after a scheduled report/learning time on a market
+        # day, run the missed process once instead of waiting until tomorrow.
+        if not self.once and _is_market_day():
+            now = _now_et()
+            today = now.date()
+            premarket_target = now.replace(hour=8, minute=30, second=0, microsecond=0)
+            postmarket_target = now.replace(hour=16, minute=15, second=0, microsecond=0)
+            learning_target = now.replace(hour=17, minute=0, second=0, microsecond=0)
+
+            premarket_path = REPORTS_DIR / today.isoformat() / "premarket.md"
+            if now >= premarket_target and not premarket_path.exists():
+                _log("Catch-up: premarket report missed; running now", self.log_file)
+                self._run_premarket_report()
+
+            postmarket_path = REPORTS_DIR / today.isoformat() / "postmarket.md"
+            if now >= postmarket_target and not postmarket_path.exists():
+                _log("Catch-up: postmarket report missed; running now", self.log_file)
+                self._run_postmarket_report()
+
+            insights_path = REPORTS_DIR / today.isoformat() / "insights.md"
+            if now >= learning_target and not insights_path.exists():
+                _log("Catch-up: learning loop missed; running now", self.log_file)
+                self._run_learning_loop()
 
         while not self.stop_event.is_set():
             now = _now_et()
@@ -265,6 +325,20 @@ class MarketMonitor:
                 and _is_market_day()
             ):
                 self._run_postmarket_report()
+
+            # Check for learning loop at 5:00 PM (17:00)
+            if (
+                now.hour == 17
+                and now.minute == 0
+                and _is_market_day()
+            ):
+                self._run_learning_loop()
+
+            # Write heartbeat for watchdog monitoring (before checking self.once)
+            try:
+                heartbeat_file.write_text(str(time.time()))
+            except Exception:
+                pass  # Silently fail if heartbeat write unavailable
 
             if self.once:
                 break

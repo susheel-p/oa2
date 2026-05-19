@@ -16,8 +16,9 @@ structural weaknesses with a clean 9-layer architecture.
 - **Exit engine** — position monitor, profit/stop/DTE/EOD/regime-flip rules, roll logic.
 - **Plain Python pipeline** — no LangGraph; simpler and easier to debug at this scale.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the 9-layer design.
-See [ROADMAP.md](ROADMAP.md) for the full production plan and gate status.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the 9-layer design.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full production plan and gate status.
+See [docs/INDEX.md](docs/INDEX.md) for complete documentation index.
 
 ## Status
 
@@ -76,6 +77,24 @@ pytest tests/ -v
 # 381 passed
 ```
 
+## Daemon & Automated Trading
+
+Run the fully-automated daemon (9:35 AM full-scan, minute-by-minute exits, reports):
+```bash
+python scripts/market_monitor.py --setup    # Print auto-start instructions (Windows/Linux/Mac)
+python scripts/market_monitor.py --once     # Single cycle (for testing)
+python scripts/market_monitor.py            # Manual daemon (foreground; Ctrl+C to stop)
+```
+
+Monitor daemon health with Telegram alerts:
+```bash
+python scripts/watchdog.py                  # One-shot check
+python scripts/watchdog.py --loop           # Continuous monitoring (every 5 min)
+# Schedule via Task Scheduler (Windows) or cron (Linux/Mac) every 5 minutes
+```
+
+See [docs/DAEMON.md](docs/DAEMON.md) for full setup and troubleshooting.
+
 ## Layout
 
 ```
@@ -103,8 +122,10 @@ scripts/
 
 | Question | File |
 |---|---|
-| Architecture + design decisions | `ARCHITECTURE.md` |
-| Full production roadmap + gates | `ROADMAP.md` |
+| Complete documentation index | [docs/INDEX.md](docs/INDEX.md) |
+| Architecture + design decisions | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Full production roadmap + gates | [docs/ROADMAP.md](docs/ROADMAP.md) |
+| Daemon setup & troubleshooting | [docs/DAEMON.md](docs/DAEMON.md) |
 | Claude/agent working context | `CLAUDE.md` |
 | All Pydantic schemas | `oa2/core/schemas.py` |
 | Feature flags | `oa2/core/feature_flags.py` |
