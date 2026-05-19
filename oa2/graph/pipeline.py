@@ -332,6 +332,7 @@ def run(
                     "structure": pick.structure_type,
                     "long_strike": pick.long_strike,
                     "short_strike": pick.short_strike,
+                    "expiry": pick.expiry or (chain.get("expiry") if isinstance(chain, dict) else None),
                     "max_profit": pick.max_profit,
                     "max_loss": pick.max_loss,
                     "odds": pick.odds,
@@ -445,10 +446,11 @@ def _run_sizing(
     direction = consensus.direction.value
     p_bull = consensus.p_bull
 
-    # --- Gate B0: quality gates (ticker blacklist + mean-revert regime) ---
+    # --- Gate B0: quality gates (KB-driven ticker blacklist + mean-revert regime) ---
     from oa2.strategy.quality_gates import (
         check_quality_gates,
         ticker_conviction_multiplier,
+        regime_conviction_multiplier,
     )
     regime_label = None
     if ctx.regime is not None:
@@ -465,9 +467,11 @@ def _run_sizing(
             "contracts": 0,
         }
 
-    # P1 ticker-quality multiplier: nudge p_bull toward 0.5 for weaker tickers,
-    # boost it for stronger tickers. Keeps the directional sign but recalibrates magnitude.
-    q_mult = ticker_conviction_multiplier(ctx.ticker)
+    # Phase 3 RAG: combined ticker + regime multiplier (KB-driven when available).
+    # Both capped to [0.5, 1.3] inside KB; final product also clipped for safety.
+    t_mult = ticker_conviction_multiplier(ctx.ticker)
+    r_mult = regime_conviction_multiplier(regime_label)
+    q_mult = max(0.40, min(1.50, t_mult * r_mult))
     if direction == "BULLISH":
         p_bull_adj = 0.5 + (p_bull - 0.5) * q_mult
     elif direction == "BEARISH":
@@ -475,6 +479,15 @@ def _run_sizing(
     else:
         p_bull_adj = p_bull
     p_bull_adj = max(0.0, min(1.0, p_bull_adj))
+
+    # Log RAG attribution so operators can see what KB applied.
+    ctx.attribution["rag_context"] = {
+        "ticker_multiplier": round(t_mult, 3),
+        "regime_multiplier": round(r_mult, 3),
+        "combined_multiplier": round(q_mult, 3),
+        "p_bull_raw": round(p_bull, 4),
+        "p_bull_adjusted": round(p_bull_adj, 4),
+    }
     p_bull = p_bull_adj
 
     # --- Gate B1/B4: Kelly ---

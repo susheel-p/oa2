@@ -44,18 +44,30 @@ def check_quality_gates(
 ) -> tuple[bool, str | None]:
     """Return (passed, reject_reason) for pre-Kelly quality filters.
 
-    Args:
-        ticker: ticker symbol.
-        regime_label: regime classifier output (e.g., 'vol_exp_mean_revert').
-
-    Returns:
-        (True, None) if all gates pass; (False, reason) if any gate blocks.
+    Phase 3: prefers KnowledgeBase verdict when available. Falls back to
+    the hardcoded TICKER_BLACKLIST + mean-revert filter for unknown tickers
+    or when KB is empty.
     """
-    if ticker.upper() in TICKER_BLACKLIST:
-        return False, f"Ticker {ticker} on quality blacklist (historical accuracy < 43%)"
+    # 1) KB-driven decision (preferred when available)
+    try:
+        from oa2.learning.rag_context import get_rag_context
+        kb = get_rag_context()
+        if kb.tickers and kb.is_blacklisted(ticker):
+            stats = kb.tickers[ticker.upper()]
+            return (
+                False,
+                f"Ticker {ticker} blacklisted by KB "
+                f"(hit_rate={stats.hit_rate:.1%}, $win_rate={stats.dollar_weighted_win_rate:.1%}, n={stats.n_trades})"
+            )
+    except Exception:
+        kb = None  # KB lookup failed; fall through to static rules
 
-    # Match either abbreviated ("vol_comp_mean_revert") or full
-    # ("vol_compression_mean_revert") form by suffix check.
+    # 2) Static blacklist fallback (covers tickers the KB hasn't seen)
+    if ticker.upper() in TICKER_BLACKLIST:
+        if kb is None or ticker.upper() not in (kb.tickers if kb else {}):
+            return False, f"Ticker {ticker} on static quality blacklist (historical accuracy < 43%)"
+
+    # 3) Mean-reverting regime gate (still static; KB regime mult only soft-suppresses)
     if regime_label and "mean_revert" in regime_label.lower():
         return False, f"Mean-reverting regime ({regime_label}) -- consensus accuracy < 45%"
 
@@ -63,9 +75,36 @@ def check_quality_gates(
 
 
 def ticker_conviction_multiplier(ticker: str) -> float:
-    """Per-ticker conviction multiplier for non-blacklisted symbols.
+    """Per-ticker conviction multiplier.
 
-    Defaults to 1.0 for unknown tickers (neutral). Blacklisted tickers
-    should be filtered by `check_quality_gates` before this is consulted.
+    Prefers KnowledgeBase value when the ticker has met MIN_OBS_FOR_MULT;
+    otherwise falls back to the hardcoded TICKER_QUALITY_SCORE; otherwise 1.0.
     """
+    try:
+        from oa2.learning.rag_context import get_rag_context
+        kb = get_rag_context()
+        if kb.tickers:
+            stats = kb.tickers.get(ticker.upper())
+            if stats and stats.n_trades >= 20:  # MIN_OBS_FOR_MULT
+                return kb.ticker_multiplier(ticker)
+    except Exception:
+        pass
     return TICKER_QUALITY_SCORE.get(ticker.upper(), 1.0)
+
+
+def regime_conviction_multiplier(regime_label: str | None) -> float:
+    """KB-driven regime multiplier (soft suppression for weak regimes).
+
+    Used in addition to the static mean-revert hard-block in check_quality_gates.
+    Returns 1.0 when KB has no data for this regime.
+    """
+    if not regime_label:
+        return 1.0
+    try:
+        from oa2.learning.rag_context import get_rag_context
+        kb = get_rag_context()
+        if kb.regimes:
+            return kb.regime_multiplier(regime_label)
+    except Exception:
+        pass
+    return 1.0
