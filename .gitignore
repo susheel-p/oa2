@@ -20,3 +20,4 @@ dist/
 ~/.oa2/
 data/
 logs/
+cache/

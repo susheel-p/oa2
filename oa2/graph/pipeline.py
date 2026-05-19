@@ -252,7 +252,7 @@ def run(
         # P1.2: session-state weight multipliers (intraday context).
         # Pipeline clock is the source of truth.
         try:
-            session_dt = clock.now()
+            session_dt = clock.now_et()
         except Exception:
             session_dt = None
         session_state = get_session_state(session_dt)
@@ -303,6 +303,56 @@ def run(
         }
     else:
         ctx.consensus = None
+
+    # ------------------------------------------------------------------
+    # L5b — structure picker: pick real strikes from chain, compute R:R
+    # ------------------------------------------------------------------
+    if ctx.consensus is not None and ctx.consensus.direction.value in ("BULLISH", "BEARISH"):
+        try:
+            from oa2.strategy import pick_structure
+            chain = ctx.market_data.get("_options_chain")
+            spot = float(ctx.market_data.get("current_price") or ctx.market_data.get("price") or 0.0)
+            iv_rank = ctx.market_data.get("iv_rank")
+            pick = pick_structure(
+                chain=chain,
+                spot=spot,
+                direction=ctx.consensus.direction.value,
+                p_bull=ctx.consensus.p_bull,
+                iv_rank=iv_rank,
+            )
+            if pick is not None:
+                ctx.market_data["max_profit"] = pick.max_profit
+                ctx.market_data["max_loss"] = pick.max_loss
+                ctx.market_data["dte"] = pick.dte
+                ctx.market_data["delta_per_contract"] = pick.delta_per_contract
+                ctx.market_data["vega_per_contract"] = pick.vega_per_contract
+                ctx.market_data["theta_per_contract"] = pick.theta_per_contract
+                ctx.market_data["selected_structure"] = pick.structure_type
+                ctx.attribution["structure_pick"] = {
+                    "structure": pick.structure_type,
+                    "long_strike": pick.long_strike,
+                    "short_strike": pick.short_strike,
+                    "max_profit": pick.max_profit,
+                    "max_loss": pick.max_loss,
+                    "odds": pick.odds,
+                    "breakeven": pick.breakeven,
+                    "reason": pick.reason,
+                }
+                logger.log_detail("Structure picked", {
+                    "structure": pick.structure_type,
+                    "odds": pick.odds,
+                    "max_profit": pick.max_profit,
+                    "max_loss": pick.max_loss,
+                }, "L5b")
+            else:
+                ctx.attribution["structure_pick"] = {"status": "no_viable_structure"}
+                logger.log_detail("No viable structure found", {
+                    "p_bull": ctx.consensus.p_bull,
+                    "direction": ctx.consensus.direction.value,
+                }, "L5b")
+        except Exception as e:
+            ctx.attribution["structure_pick_error"] = str(e)
+            logger.log_warning("Structure picker failed", str(e))
 
     # ------------------------------------------------------------------
     # L6 — sizing engine (Kelly + book limits + CVaR)

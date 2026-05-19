@@ -314,17 +314,17 @@ def main() -> None:
             n_exits = len(result.get("exit_alerts", []))
 
             if status == "sized_approved":
-                _log(f"    ✓ APPROVED — {contracts} contract(s)")
+                _log(f"    [OK] APPROVED -- {contracts} contract(s)")
             elif status == "sized_rejected":
                 reason = (result.get("sizing") or {}).get("reject_reason", "")
-                _log(f"    ✗ REJECTED — {reason[:60]}")
+                _log(f"    [X] REJECTED -- {reason[:60]}")
             elif status == "error":
-                _log(f"    ✗ ERROR")
+                _log(f"    [X] ERROR")
             else:
-                _log(f"    — {status}")
+                _log(f"    -- {status}")
 
             if n_exits:
-                _log(f"    ⚠ {n_exits} exit alert(s) for open positions")
+                _log(f"    [!] {n_exits} exit alert(s) for open positions")
 
     # ── Save open positions for exit monitor ──────────────────────────────────
     positions_path = LOG_DIR / f"positions_{today}.json"

@@ -1,13 +1,22 @@
 {
   "date": "2026-05-18",
-  "run_ts": "2026-05-18T15:43:22-0400",
+  "run_ts": "2026-05-18T20:01:42-0400",
   "account_size": 50000.0,
   "tickers_scanned": 22,
-  "approved_count": 0,
-  "rejected_count": 22,
+  "approved_count": 8,
+  "rejected_count": 14,
   "error_count": 0,
   "exit_alert_count": 0,
-  "approved_tickers": [],
+  "approved_tickers": [
+    "SPY",
+    "QQQ",
+    "DIA",
+    "XLE",
+    "NVDA",
+    "TSLA",
+    "AAPL",
+    "MSFT"
+  ],
   "exit_alerts": [],
   "book_state": {
     "account_size": 50000.0,
