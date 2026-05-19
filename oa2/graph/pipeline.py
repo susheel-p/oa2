@@ -445,6 +445,38 @@ def _run_sizing(
     direction = consensus.direction.value
     p_bull = consensus.p_bull
 
+    # --- Gate B0: quality gates (ticker blacklist + mean-revert regime) ---
+    from oa2.strategy.quality_gates import (
+        check_quality_gates,
+        ticker_conviction_multiplier,
+    )
+    regime_label = None
+    if ctx.regime is not None:
+        try:
+            regime_label = f"{ctx.regime.vol_state.value}_{ctx.regime.trend_state.value}".lower()
+        except Exception:
+            regime_label = None
+    q_passed, q_reason = check_quality_gates(ctx.ticker, regime_label)
+    if not q_passed:
+        return {
+            "approved": False,
+            "reject_gate": "quality",
+            "reject_reason": q_reason,
+            "contracts": 0,
+        }
+
+    # P1 ticker-quality multiplier: nudge p_bull toward 0.5 for weaker tickers,
+    # boost it for stronger tickers. Keeps the directional sign but recalibrates magnitude.
+    q_mult = ticker_conviction_multiplier(ctx.ticker)
+    if direction == "BULLISH":
+        p_bull_adj = 0.5 + (p_bull - 0.5) * q_mult
+    elif direction == "BEARISH":
+        p_bull_adj = 0.5 - (0.5 - p_bull) * q_mult
+    else:
+        p_bull_adj = p_bull
+    p_bull_adj = max(0.0, min(1.0, p_bull_adj))
+    p_bull = p_bull_adj
+
     # --- Gate B1/B4: Kelly ---
     kelly = size_from_consensus(
         p_bull=p_bull,

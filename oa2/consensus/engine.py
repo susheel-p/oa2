@@ -332,12 +332,17 @@ class ConsensusEngine:
     def _calibrate_probability(raw_score: float, n_eff: float) -> float:
         """Calibrate probability of bullish from raw consensus score and N_eff.
 
-        p_bull = sigmoid(raw_score × n_eff × 2)
+        p_bull = sigmoid(raw_score x sqrt(n_eff))
 
-        N_eff amplifies the signal: N independent agreements are more
-        informative than N correlated ones.
+        Backtest analysis (2026-05-18, 1,650 days) showed the prior
+        `raw_score * n_eff * 2.0` saturated the sigmoid into a bimodal
+        distribution (all p_bull either <0.30 or >0.70 with empty middle),
+        and high-conviction signals actually predicted WORSE than random
+        (48.6% accuracy at p>=0.70). Switching to sqrt(n_eff) without the
+        x2 amplifier restores the middle ground (0.40-0.65) where Kelly
+        sizing can be most informative.
         """
-        x = raw_score * n_eff * 2.0
+        x = raw_score * math.sqrt(max(n_eff, 1.0))
         if x > 100:
             return 1.0
         if x < -100:

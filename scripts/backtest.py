@@ -190,16 +190,14 @@ def compute_daily_context(
 
     rv_iv_ratio = rv_30 / (rv_30 * 1.1) if rv_30 > 0 else 1.0  # simplified proxy
 
-    # P2.1 backtest support: synthesize put_call_skew from recent price action + VIX.
-    # Real-world proxy: when market is selling off into rising vol, dealers price
-    # in heavier put-side IV (skew up). When rallying with falling vol, call-skew rises.
-    # This is a synthetic stand-in until live IV-skew is wired from a data provider.
+    # P2.1 backtest support: synthesize put_call_skew from VIX pressure only.
+    # Prior version used recent_ret with negative coefficient, which created a
+    # systematic mean-reverting bearish signal (drawdown -> bearish vote,
+    # often wrong because markets mean-revert up after pullbacks).
+    # VIX pressure alone is a valid hedge-demand proxy without the mean-revert trap.
     if day_idx >= 5:
-        recent_ret = (price - closes[day_idx - 5]) / closes[day_idx - 5] if closes[day_idx - 5] > 0 else 0.0
-        vix_pressure = max(0.0, (vix - 18.0) / 30.0)   # 0 at VIX=18, 1 at VIX=48
-        # Inverse: drawdown + high vix -> positive skew (puts expensive); rally + low vix -> negative
-        put_call_skew = -recent_ret * 0.8 + vix_pressure * 0.05
-        # Clip to plausible range observed in real markets
+        vix_pressure = max(0.0, (vix - 20.0) / 30.0)  # 0 at VIX<=20, 1 at VIX=50
+        put_call_skew = vix_pressure * 0.08            # max +0.08 (bearish hedge)
         put_call_skew = max(-0.15, min(0.15, put_call_skew))
     else:
         put_call_skew = 0.0

@@ -113,15 +113,23 @@ def _group_b_vote(price: float, ema_20: float, ema_50: float) -> int:
     return 0
 
 
-def _group_c_vote(rsi: float) -> int:
-    """Group C: RSI oscillator.
+def _group_c_vote(rsi: float, ema_20: float = 0.0, ema_50: float = 0.0) -> int:
+    """Group C: RSI oscillator, gated by EMA trend (P0 bearish-asymmetry fix).
 
-    Returns: +1 (oversold = bullish signal), -1 (overbought = bearish), 0 (neutral).
+    Prior version returned bearish on RSI>70 unconditionally, which produced
+    systematic false bearish signals in trending markets (uptrend with high
+    RSI is continuation, not exhaustion). Now requires opposite-trend gate:
+      - Oversold (RSI<30) bullish only when EMA20 >= EMA50 (uptrend dip)
+      - Overbought (RSI>70) bearish only when EMA20 <= EMA50 (downtrend rip)
+
+    Returns: +1 (bullish), -1 (bearish), 0 (neutral).
     """
-    if rsi < 30:
-        return 1    # oversold → mean reversion bullish
-    if rsi > 70:
-        return -1   # overbought → mean reversion bearish
+    trend_up = ema_20 > 0 and ema_50 > 0 and ema_20 >= ema_50
+    trend_down = ema_20 > 0 and ema_50 > 0 and ema_20 <= ema_50
+    if rsi < 30 and trend_up:
+        return 1    # oversold dip in uptrend -> buy the dip
+    if rsi > 70 and trend_down:
+        return -1   # overbought rip in downtrend -> fade the rally
     return 0
 
 
@@ -241,7 +249,7 @@ class DirectionalDebater(DebaterBase):
         group_votes = {
             "A_momentum": _group_a_vote(price, vwap, prior_close, atr),
             "B_ema": _group_b_vote(price, ema_20, ema_50),
-            "C_rsi": _group_c_vote(rsi),
+            "C_rsi": _group_c_vote(rsi, ema_20, ema_50),
             "D_mtf": _group_d_vote(mtf_alignment),
             "E_momentum_confirm": e_vote,
         }
