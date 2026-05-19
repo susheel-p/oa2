@@ -12,6 +12,7 @@ Phases wired:
 
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -445,6 +446,19 @@ def _run_sizing(
 
     direction = consensus.direction.value
     p_bull = consensus.p_bull
+
+    # --- Phase A1: directional bias filter ---
+    # 12-month backtest (4510 days): BULLISH 49.2% vs BEARISH 42.0% accuracy.
+    # Bearish signals are systematically losing (1,254 trades, -$160 simulated on $1k).
+    # Block BEARISH entirely until B-phase root cause is fixed.
+    BEARISH_ENABLED = bool(int(os.getenv("OA2_FLAG_BEARISH", "0")))
+    if direction == "BEARISH" and not BEARISH_ENABLED:
+        return {
+            "approved": False,
+            "reject_gate": "directional_bias",
+            "reject_reason": "BEARISH signals disabled (42% historical accuracy, set OA2_FLAG_BEARISH=1 to re-enable)",
+            "contracts": 0,
+        }
 
     # --- Gate B0: quality gates (KB-driven ticker blacklist + mean-revert regime) ---
     from oa2.strategy.quality_gates import (

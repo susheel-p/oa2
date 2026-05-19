@@ -635,6 +635,8 @@ def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
         exp_date = next_friday.strftime("%Y-%m-%d")
 
         chain = fetch_options_chain(ticker, exp_date)
+        if isinstance(chain, dict):
+            chain["expiry"] = exp_date
 
         # IV rank (with validation to catch 0-1 scale errors)
         iv_rank = calculate_iv_rank(ticker)

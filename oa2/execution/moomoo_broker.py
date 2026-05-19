@@ -64,14 +64,76 @@ def _init_status_map() -> None:
     })
 
 
-def _format_option_code(spec: LegSpec) -> str:
+def _format_option_code(spec: LegSpec, strike_override: float | None = None) -> str:
     """Moomoo US options code: e.g. US.AAPL230616C00150000
 
     YYMMDD + C/P + strike*1000 zero-padded to 8 digits.
     """
     yymmdd = spec.expiry.strftime("%y%m%d")
-    strike_int = int(round(spec.strike * 1000))
+    strike = strike_override if strike_override is not None else spec.strike
+    strike_int = int(round(strike * 1000))
     return f"US.{spec.underlying.upper()}{yymmdd}{spec.right}{strike_int:08d}"
+
+
+# In-process cache: (underlying, expiry_iso, right) -> sorted list of valid strikes
+_STRIKE_CACHE: dict[tuple[str, str, str], list[float]] = {}
+# Max distance (in dollars) to snap a requested strike onto a real chain strike.
+# Beyond this we reject rather than trade something materially different.
+STRIKE_SNAP_MAX_DOLLARS = 2.5
+
+
+def _fetch_valid_strikes(quote_ctx: Any, underlying: str, expiry: Any, right: str) -> list[float]:
+    """Return moomoo's actual strike list for (underlying, expiry, right). Cached."""
+    expiry_iso = expiry.strftime("%Y-%m-%d") if hasattr(expiry, "strftime") else str(expiry)
+    key = (underlying.upper(), expiry_iso, right.upper())
+    if key in _STRIKE_CACHE:
+        return _STRIKE_CACHE[key]
+
+    code = f"US.{underlying.upper()}"
+    opt_type = ft.OptionType.CALL if right.upper() == "C" else ft.OptionType.PUT
+    try:
+        ret, data = quote_ctx.get_option_chain(
+            code,
+            index_option_type=ft.IndexOptionType.NORMAL,
+            start=expiry_iso,
+            end=expiry_iso,
+            option_type=opt_type,
+        )
+    except Exception as exc:
+        logger.warning("get_option_chain raised for %s %s %s: %s", underlying, expiry_iso, right, exc)
+        return []
+
+    if ret != 0 or data is None or getattr(data, "empty", True):
+        return []
+
+    try:
+        strikes = sorted({float(s) for s in data["strike_price"].tolist() if s is not None})
+    except Exception as exc:
+        logger.warning("Could not parse strikes for %s %s %s: %s", underlying, expiry_iso, right, exc)
+        return []
+
+    _STRIKE_CACHE[key] = strikes
+    return strikes
+
+
+def _snap_strike(quote_ctx: Any, spec: LegSpec) -> tuple[float | None, str | None]:
+    """Snap spec.strike to nearest valid moomoo strike.
+
+    Returns (snapped_strike, None) on success, or (None, reason) if no strike
+    is within STRIKE_SNAP_MAX_DOLLARS or the chain is empty.
+    """
+    strikes = _fetch_valid_strikes(quote_ctx, spec.underlying, spec.expiry, spec.right)
+    if not strikes:
+        # Chain unavailable (after-hours, weekend, broker error) — pass through
+        # rather than block. The order may still reject downstream.
+        return spec.strike, None
+    nearest = min(strikes, key=lambda s: abs(s - spec.strike))
+    if abs(nearest - spec.strike) > STRIKE_SNAP_MAX_DOLLARS:
+        return None, (
+            f"strike {spec.strike:g} has no moomoo listing within "
+            f"${STRIKE_SNAP_MAX_DOLLARS:.2f} (nearest {nearest:g})"
+        )
+    return nearest, None
 
 
 class MoomooBroker:
@@ -135,7 +197,20 @@ class MoomooBroker:
         if client_order_id in self._cid_to_oid:
             return self.get_leg(self._cid_to_oid[client_order_id])
 
-        code = _format_option_code(leg)
+        try:
+            from oa2.dataflows.moomoo_data import _get_quote_context
+            snapped, reason = _snap_strike(_get_quote_context(), leg)
+        except Exception as exc:
+            logger.warning("strike snap failed for %s: %s", leg.underlying, exc)
+            snapped, reason = leg.strike, None
+        if snapped is None:
+            return LegFill(leg_id="", status=LegStatus.REJECTED, error=f"strike snap: {reason}")
+        if snapped != leg.strike:
+            logger.info(
+                "snapped %s %s %s strike %.4f -> %.4f",
+                leg.underlying, leg.expiry, leg.right, leg.strike, snapped,
+            )
+        code = _format_option_code(leg, strike_override=snapped)
         trd_side = ft.TrdSide.BUY if leg.side > 0 else ft.TrdSide.SELL
         order_type = ft.OrderType.NORMAL if leg.limit_price is not None else ft.OrderType.MARKET
         price = leg.limit_price if leg.limit_price is not None else 0.0

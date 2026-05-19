@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(if \\(Test-Path .env\\) { Get-Content .env | Select-String -Pattern '^\\(MOOMOO_USERNAME|MOOMOO_PASSWORD|MOOMOO_ACCOUNT_ID\\)=' | ForEach-Object { \\($_ -split '='\\)[0] } } else { Write-Output \"NO_ENV\" })"
+      "PowerShell(if \\(Test-Path .env\\) { Get-Content .env | Select-String -Pattern '^\\(MOOMOO_USERNAME|MOOMOO_PASSWORD|MOOMOO_ACCOUNT_ID\\)=' | ForEach-Object { \\($_ -split '='\\)[0] } } else { Write-Output \"NO_ENV\" })",
+      "Bash(python scripts/daily_learn.py)"
     ]
   }
 }

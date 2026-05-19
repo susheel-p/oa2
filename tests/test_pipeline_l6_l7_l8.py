@@ -155,6 +155,27 @@ class TestL6SizingApproved(unittest.TestCase):
         self.assertGreater(kelly["edge"], 0.52)
 
     def test_bearish_consensus_also_sizes(self):
+        """Phase A1: BEARISH blocked by default; re-enable via OA2_FLAG_BEARISH=1."""
+        import os
+        ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
+        ctx.consensus = _make_bullish_consensus(p_bull=0.25, direction="BEARISH")
+
+        from oa2.graph.pipeline import _run_sizing
+        book = GreeksBook(account_size=50_000)
+
+        os.environ["OA2_FLAG_BEARISH"] = "1"
+        try:
+            result = _run_sizing(ctx, book, 50_000)
+            # edge = 1 - 0.25 = 0.75 → should approve when BEARISH enabled
+            self.assertTrue(result["approved"])
+            self.assertGreater(result["contracts"], 0)
+        finally:
+            os.environ.pop("OA2_FLAG_BEARISH", None)
+
+    def test_bearish_blocked_by_default(self):
+        """Phase A1: with OA2_FLAG_BEARISH unset, BEARISH consensus is rejected."""
+        import os
+        os.environ.pop("OA2_FLAG_BEARISH", None)
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_bullish_consensus(p_bull=0.25, direction="BEARISH")
 
@@ -162,9 +183,9 @@ class TestL6SizingApproved(unittest.TestCase):
         book = GreeksBook(account_size=50_000)
         result = _run_sizing(ctx, book, 50_000)
 
-        # edge = 1 - 0.25 = 0.75 → should approve
-        self.assertTrue(result["approved"])
-        self.assertGreater(result["contracts"], 0)
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["reject_gate"], "directional_bias")
+        self.assertEqual(result["contracts"], 0)
 
 
 class TestL6SizingRejected(unittest.TestCase):

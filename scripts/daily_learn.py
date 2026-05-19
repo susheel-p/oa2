@@ -3,7 +3,7 @@
 Run nightly after eod_outcomes.py. Reads outcomes_history.jsonl + the latest
 backtest result, builds a fresh KnowledgeBase, writes it to
 ~/.oa2/knowledge_base.json (atomic), and emits a human-readable insights
-report to reports/<date>_insights.md.
+report to reports/<date>/insights.md.
 
 Sources merged (in priority order):
   1. ~/.oa2/outcomes/outcomes_history.jsonl  (live + paper-trade outcomes)
@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -35,7 +36,7 @@ from oa2.learning.knowledge_base import (
 )
 
 
-REPORTS_DIR = Path("reports")
+REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
 
 
 # ----- Data loading ---------------------------------------------------------
@@ -171,9 +172,10 @@ def _report_markdown(kb: KnowledgeBase) -> str:
 
 
 def _write_report(content: str, dry_run: bool) -> Path:
-    REPORTS_DIR.mkdir(exist_ok=True)
     today = datetime.date.today().isoformat()
-    path = REPORTS_DIR / f"{today}_insights.md"
+    day_dir = REPORTS_DIR / today
+    day_dir.mkdir(parents=True, exist_ok=True)
+    path = day_dir / "insights.md"
     if not dry_run:
         path.write_text(content, encoding="utf-8")
     return path

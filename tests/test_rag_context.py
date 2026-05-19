@@ -97,8 +97,8 @@ class TestEmptyKBFallback:
             lambda: tmp_path / "nonexistent.json",
         )
         reset_rag_cache()
-        # SLV is in the static blacklist
-        passed, reason = check_quality_gates("SLV", "normal_neutral")
+        # META is in the static blacklist (refreshed from 12mo data)
+        passed, reason = check_quality_gates("META", "normal_neutral")
         assert not passed
         assert "static quality blacklist" in reason
         reset_rag_cache()

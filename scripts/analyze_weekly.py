@@ -19,6 +19,7 @@ import argparse
 import datetime
 import json
 import math
+import os
 import statistics
 import sys
 from collections import defaultdict
@@ -339,7 +340,11 @@ def main() -> int:
 
     report = _markdown_report(weekly, by_ticker, by_regime, bias, calib, meta)
 
-    out_path = Path(args.output) if args.output else Path("reports") / f"weekly_analysis_{datetime.date.today()}.md"
+    if args.output:
+        out_path = Path(args.output)
+    else:
+        reports_dir = Path(os.getenv("REPORTS_DIR", "reports"))
+        out_path = reports_dir / datetime.date.today().isoformat() / "weekly_analysis.md"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report, encoding="utf-8")
 

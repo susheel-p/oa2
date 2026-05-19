@@ -16,18 +16,30 @@ from __future__ import annotations
 from typing import Any
 
 
-# Tickers with <43% accuracy over the 6-month sample — net negative EV.
-TICKER_BLACKLIST: set[str] = {"SLV", "TLT", "DIA", "TSLA", "XLV"}
+# Tickers with negative Sharpe over the 12-month backtest (results_20260519_003232).
+# Refreshed from 1-year data; supersedes the 6-month list which had overfit
+# (SLV was incorrectly blacklisted -- 12mo Sharpe +1.15, return +56%).
+#
+# 12mo Sharpe < 0:
+#   META  -1.68   XLI   -2.02   TLT   -1.14   AMZN  -0.92   IWM   -0.89
+#   XLY   -0.39   NVDA  -0.28   XLV   -0.28   DIA   -0.10   TSLA  -0.07
+#
+# Hard blacklist: requires both negative Sharpe AND accuracy < 45%.
+TICKER_BLACKLIST: set[str] = {"META", "XLI", "XLF", "TLT", "XLV"}
 
 # Per-ticker quality multiplier (1.0 = no change; 0.0 = block).
-# Derived from rolling accuracy; multiplied with consensus conviction.
+# Sourced from 12mo Sharpe ranking (see weekly_analysis_2026-05-19.md).
 TICKER_QUALITY_SCORE: dict[str, float] = {
-    "XLE": 1.10, "GOOGL": 1.08, "USO": 1.07, "AMD": 1.07, "XLK": 1.06,
-    "AMZN": 1.02, "XLY": 1.00, "NVDA": 1.00, "MSFT": 1.00, "QQQ": 1.00,
-    "XLI": 1.00, "SPY": 0.97, "META": 0.95, "AAPL": 0.95, "IWM": 0.94,
-    "XLF": 0.93, "GLD": 0.88,
-    # Blacklisted (set to 0 to make the suppression explicit):
-    "XLV": 0.0, "TSLA": 0.0, "DIA": 0.0, "TLT": 0.0, "SLV": 0.0,
+    # Top performers (Sharpe > +1.0)
+    "GOOGL": 1.20, "AAPL": 1.15, "AMD": 1.10, "SLV": 1.08, "MSFT": 1.05,
+    "GLD": 1.03, "XLK": 1.02, "QQQ": 1.00,
+    # Neutral (Sharpe 0 to +1)
+    "USO": 0.98, "XLE": 0.95, "SPY": 0.90,
+    # Weak (negative Sharpe but not blacklisted)
+    "TSLA": 0.85, "DIA": 0.85, "NVDA": 0.85, "XLY": 0.80,
+    "IWM": 0.75, "AMZN": 0.75, "GLD": 0.70,
+    # Blacklisted (explicit zero):
+    "META": 0.0, "XLI": 0.0, "XLF": 0.0, "TLT": 0.0, "XLV": 0.0,
 }
 
 # Regimes where consensus has historically been below random.

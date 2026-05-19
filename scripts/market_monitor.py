@@ -88,34 +88,59 @@ def _time_until_next_event(target_hour: int, target_minute: int) -> float:
     return (target - now).total_seconds()
 
 
+_TIMEOUTS = {
+    "FULL-SCAN": 1800,           # 30 min — debaters + chain fetch for 22 tickers
+    "PREMARKET-REPORT": 600,     # 10 min
+    "POSTMARKET-REPORT": 600,    # 10 min
+    "EXIT-ONLY": 120,            # 2 min — must fit inside the 60s scheduler tick
+}
+
+
+def _tail(text: str | None, n_chars: int = 2000) -> str:
+    if not text:
+        return "<empty>"
+    text = text.rstrip()
+    if len(text) <= n_chars:
+        return text
+    return "...<truncated>...\n" + text[-n_chars:]
+
+
 def _run_command(cmd: list[str], label: str, log_file: Path | None = None) -> bool:
     """Run a shell command and log the result."""
+    timeout_s = _TIMEOUTS.get(label, 300)
+    t_start = time.monotonic()
+    _log(f"[{label}] Starting (timeout {timeout_s}s) cmd={cmd}", log_file)
     try:
-        _log(f"[{label}] Starting ...", log_file)
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        elapsed = time.monotonic() - t_start
         if result.returncode == 0:
-            _log(f"[{label}] SUCCESS", log_file)
+            _log(f"[{label}] SUCCESS in {elapsed:.1f}s", log_file)
             return True
-        else:
-            _log(f"[{label}] FAILED (exit code {result.returncode})", log_file)
-            if result.stderr:
-                _log(f"[{label}] stderr: {result.stderr[:200]}", log_file)
-            return False
-    except subprocess.TimeoutExpired:
-        _log(f"[{label}] TIMEOUT (5 min)", log_file)
+        _log(f"[{label}] FAILED exit={result.returncode} in {elapsed:.1f}s", log_file)
+        _log(f"[{label}] stdout tail:\n{_tail(result.stdout)}", log_file)
+        _log(f"[{label}] stderr tail:\n{_tail(result.stderr)}", log_file)
+        return False
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - t_start
+        _log(f"[{label}] TIMEOUT after {elapsed:.1f}s (limit {timeout_s}s)", log_file)
+        _log(f"[{label}] stdout tail:\n{_tail(exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout)}", log_file)
+        _log(f"[{label}] stderr tail:\n{_tail(exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr)}", log_file)
         return False
     except Exception as exc:
-        _log(f"[{label}] ERROR: {exc}", log_file)
+        elapsed = time.monotonic() - t_start
+        _log(f"[{label}] ERROR after {elapsed:.1f}s: {exc!r}", log_file)
+        _log(f"[{label}] traceback:\n{traceback.format_exc()}", log_file)
         return False
 
 
 class MarketMonitor:
     """Daemon that schedules full-scan, exit-only, and report generation."""
 
-    def __init__(self, dry_run: bool = False, once: bool = False, daemon_mode: bool = False):
+    def __init__(self, dry_run: bool = False, once: bool = False, daemon_mode: bool = False, scan_on_start: bool = False):
         self.dry_run = dry_run
         self.once = once
         self.daemon_mode = daemon_mode
+        self.scan_on_start = scan_on_start
         self.log_file = _get_daemon_log_path() if daemon_mode else None
         self.full_scan_done_today = False
         self.premarket_done_today = False
@@ -199,6 +224,10 @@ class MarketMonitor:
         _log("Market monitor started", self.log_file)
 
         last_daily_reset = _now_et().date()
+
+        if self.scan_on_start and not self.once:
+            _log("Scan-on-start: running full-scan immediately", self.log_file)
+            self._run_full_scan()
 
         while not self.stop_event.is_set():
             now = _now_et()
@@ -305,6 +334,11 @@ Check daemon logs:
         help="Run one cycle and exit (for testing)",
     )
     parser.add_argument(
+        "--scan-on-start",
+        action="store_true",
+        help="Run a full-scan immediately on startup, then continue scheduling",
+    )
+    parser.add_argument(
         "--setup",
         action="store_true",
         help="Print setup instructions for Windows Task Scheduler",
@@ -318,7 +352,7 @@ Check daemon logs:
     # Detect daemon mode (no --once and not --dry-run)
     daemon_mode = not args.once and not args.dry_run
 
-    monitor = MarketMonitor(dry_run=args.dry_run, once=args.once, daemon_mode=daemon_mode)
+    monitor = MarketMonitor(dry_run=args.dry_run, once=args.once, daemon_mode=daemon_mode, scan_on_start=args.scan_on_start)
 
     if daemon_mode:
         log_file = _get_daemon_log_path()
