@@ -1,6 +1,6 @@
 # Premarket Report — 2026-05-18
 
-Generated: 2026-05-19 08:30:02 EDT
+Generated: 2026-05-19 13:31:08 EDT
 
 Based on yesterday's scan (2026-05-18). Prices are premarket.
 
@@ -23,10 +23,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $753.42 | Entry → Profit target watch |
-| +1% | $746.04 | Entry → Profit target watch |
-| -1% | $731.26 | Hold or reassess |
-| -2% | $723.88 | Hold or reassess |
+| +2% | $752.18 | Entry → Profit target watch |
+| +1% | $744.80 | Entry → Profit target watch |
+| -1% | $730.06 | Hold or reassess |
+| -2% | $722.68 | Hold or reassess |
 
 **Max Risk:** $2,416.00 | **Contracts:** 8
 
@@ -44,10 +44,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $720.00 | Entry → Profit target watch |
-| +1% | $712.94 | Entry → Profit target watch |
-| -1% | $698.82 | Hold or reassess |
-| -2% | $691.76 | Hold or reassess |
+| +2% | $720.24 | Entry → Profit target watch |
+| +1% | $713.18 | Entry → Profit target watch |
+| -1% | $699.06 | Hold or reassess |
+| -2% | $692.00 | Hold or reassess |
 
 **Max Risk:** $2,855.00 | **Contracts:** 5
 
@@ -65,10 +65,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $506.95 | Entry → Profit target watch |
-| +1% | $501.98 | Entry → Profit target watch |
-| -1% | $492.04 | Hold or reassess |
-| -2% | $487.07 | Hold or reassess |
+| +2% | $505.96 | Entry → Profit target watch |
+| +1% | $501.00 | Entry → Profit target watch |
+| -1% | $491.08 | Hold or reassess |
+| -2% | $486.12 | Hold or reassess |
 
 **Max Risk:** $2,052.00 | **Contracts:** 9
 
@@ -86,10 +86,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $61.79 | Entry → Profit target watch |
-| +1% | $61.19 | Entry → Profit target watch |
-| -1% | $59.97 | Hold or reassess |
-| -2% | $59.37 | Hold or reassess |
+| +2% | $62.30 | Entry → Profit target watch |
+| +1% | $61.69 | Entry → Profit target watch |
+| -1% | $60.47 | Hold or reassess |
+| -2% | $59.86 | Hold or reassess |
 
 **Max Risk:** $960.00 | **Contracts:** 20
 
@@ -107,10 +107,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $226.77 | Entry → Profit target watch |
-| +1% | $224.54 | Entry → Profit target watch |
-| -1% | $220.10 | Hold or reassess |
-| -2% | $217.87 | Hold or reassess |
+| +2% | $228.29 | Entry → Profit target watch |
+| +1% | $226.05 | Entry → Profit target watch |
+| -1% | $221.57 | Hold or reassess |
+| -2% | $219.33 | Hold or reassess |
 
 **Max Risk:** $2,070.00 | **Contracts:** 18
 
@@ -128,10 +128,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $418.19 | Entry → Profit target watch |
-| +1% | $414.09 | Entry → Profit target watch |
-| -1% | $405.89 | Hold or reassess |
-| -2% | $401.79 | Hold or reassess |
+| +2% | $411.71 | Entry → Profit target watch |
+| +1% | $407.68 | Entry → Profit target watch |
+| -1% | $399.60 | Hold or reassess |
+| -2% | $395.57 | Hold or reassess |
 
 **Max Risk:** $2,250.00 | **Contracts:** 10
 
@@ -149,10 +149,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $303.80 | Entry → Profit target watch |
-| +1% | $300.82 | Entry → Profit target watch |
-| -1% | $294.86 | Hold or reassess |
-| -2% | $291.88 | Hold or reassess |
+| +2% | $304.17 | Entry → Profit target watch |
+| +1% | $301.19 | Entry → Profit target watch |
+| -1% | $295.23 | Hold or reassess |
+| -2% | $292.25 | Hold or reassess |
 
 **Max Risk:** $1,024.00 | **Contracts:** 8
 
@@ -170,10 +170,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $432.01 | Entry → Profit target watch |
-| +1% | $427.78 | Entry → Profit target watch |
-| -1% | $419.30 | Hold or reassess |
-| -2% | $415.07 | Hold or reassess |
+| +2% | $427.41 | Entry → Profit target watch |
+| +1% | $423.22 | Entry → Profit target watch |
+| -1% | $414.84 | Hold or reassess |
+| -2% | $410.65 | Hold or reassess |
 
 **Max Risk:** $1,250.00 | **Contracts:** 5
 
@@ -191,10 +191,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $753.42 | Entry → Profit target watch |
-| +1% | $746.04 | Entry → Profit target watch |
-| -1% | $731.26 | Hold or reassess |
-| -2% | $723.88 | Hold or reassess |
+| +2% | $752.17 | Entry → Profit target watch |
+| +1% | $744.80 | Entry → Profit target watch |
+| -1% | $730.05 | Hold or reassess |
+| -2% | $722.68 | Hold or reassess |
 
 **Max Risk:** $2,114.00 | **Contracts:** 7
 
@@ -212,10 +212,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $720.00 | Entry → Profit target watch |
-| +1% | $712.94 | Entry → Profit target watch |
-| -1% | $698.82 | Hold or reassess |
-| -2% | $691.76 | Hold or reassess |
+| +2% | $720.21 | Entry → Profit target watch |
+| +1% | $713.15 | Entry → Profit target watch |
+| -1% | $699.03 | Hold or reassess |
+| -2% | $691.97 | Hold or reassess |
 
 **Max Risk:** $2,284.00 | **Contracts:** 4
 
@@ -233,10 +233,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $61.79 | Entry → Profit target watch |
-| +1% | $61.19 | Entry → Profit target watch |
-| -1% | $59.97 | Hold or reassess |
-| -2% | $59.37 | Hold or reassess |
+| +2% | $62.30 | Entry → Profit target watch |
+| +1% | $61.69 | Entry → Profit target watch |
+| -1% | $60.47 | Hold or reassess |
+| -2% | $59.86 | Hold or reassess |
 
 **Max Risk:** $960.00 | **Contracts:** 20
 
@@ -254,10 +254,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $226.77 | Entry → Profit target watch |
-| +1% | $224.54 | Entry → Profit target watch |
-| -1% | $220.10 | Hold or reassess |
-| -2% | $217.87 | Hold or reassess |
+| +2% | $228.30 | Entry → Profit target watch |
+| +1% | $226.06 | Entry → Profit target watch |
+| -1% | $221.58 | Hold or reassess |
+| -2% | $219.34 | Hold or reassess |
 
 **Max Risk:** $1,840.00 | **Contracts:** 16
 
@@ -275,10 +275,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $303.80 | Entry → Profit target watch |
-| +1% | $300.82 | Entry → Profit target watch |
-| -1% | $294.86 | Hold or reassess |
-| -2% | $291.88 | Hold or reassess |
+| +2% | $304.17 | Entry → Profit target watch |
+| +1% | $301.19 | Entry → Profit target watch |
+| -1% | $295.23 | Hold or reassess |
+| -2% | $292.25 | Hold or reassess |
 
 **Max Risk:** $640.00 | **Contracts:** 5
 
@@ -296,10 +296,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $432.01 | Entry → Profit target watch |
-| +1% | $427.78 | Entry → Profit target watch |
-| -1% | $419.30 | Hold or reassess |
-| -2% | $415.07 | Hold or reassess |
+| +2% | $427.46 | Entry → Profit target watch |
+| +1% | $423.27 | Entry → Profit target watch |
+| -1% | $414.89 | Hold or reassess |
+| -2% | $410.70 | Hold or reassess |
 
 **Max Risk:** $1,000.00 | **Contracts:** 4
 
@@ -317,10 +317,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $753.42 | Entry → Profit target watch |
-| +1% | $746.04 | Entry → Profit target watch |
-| -1% | $731.26 | Hold or reassess |
-| -2% | $723.88 | Hold or reassess |
+| +2% | $752.18 | Entry → Profit target watch |
+| +1% | $744.80 | Entry → Profit target watch |
+| -1% | $730.06 | Hold or reassess |
+| -2% | $722.68 | Hold or reassess |
 
 **Max Risk:** $2,114.00 | **Contracts:** 7
 
@@ -338,10 +338,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $720.00 | Entry → Profit target watch |
-| +1% | $712.94 | Entry → Profit target watch |
-| -1% | $698.82 | Hold or reassess |
-| -2% | $691.76 | Hold or reassess |
+| +2% | $720.24 | Entry → Profit target watch |
+| +1% | $713.18 | Entry → Profit target watch |
+| -1% | $699.06 | Hold or reassess |
+| -2% | $692.00 | Hold or reassess |
 
 **Max Risk:** $2,284.00 | **Contracts:** 4
 
@@ -359,10 +359,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $61.79 | Entry → Profit target watch |
-| +1% | $61.19 | Entry → Profit target watch |
-| -1% | $59.97 | Hold or reassess |
-| -2% | $59.37 | Hold or reassess |
+| +2% | $62.30 | Entry → Profit target watch |
+| +1% | $61.69 | Entry → Profit target watch |
+| -1% | $60.47 | Hold or reassess |
+| -2% | $59.86 | Hold or reassess |
 
 **Max Risk:** $960.00 | **Contracts:** 20
 
@@ -380,10 +380,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $226.77 | Entry → Profit target watch |
-| +1% | $224.54 | Entry → Profit target watch |
-| -1% | $220.10 | Hold or reassess |
-| -2% | $217.87 | Hold or reassess |
+| +2% | $228.30 | Entry → Profit target watch |
+| +1% | $226.06 | Entry → Profit target watch |
+| -1% | $221.58 | Hold or reassess |
+| -2% | $219.34 | Hold or reassess |
 
 **Max Risk:** $1,840.00 | **Contracts:** 16
 
@@ -401,10 +401,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $303.80 | Entry → Profit target watch |
-| +1% | $300.82 | Entry → Profit target watch |
-| -1% | $294.86 | Hold or reassess |
-| -2% | $291.88 | Hold or reassess |
+| +2% | $304.17 | Entry → Profit target watch |
+| +1% | $301.19 | Entry → Profit target watch |
+| -1% | $295.23 | Hold or reassess |
+| -2% | $292.25 | Hold or reassess |
 
 **Max Risk:** $640.00 | **Contracts:** 5
 
@@ -422,10 +422,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $432.01 | Entry → Profit target watch |
-| +1% | $427.78 | Entry → Profit target watch |
-| -1% | $419.30 | Hold or reassess |
-| -2% | $415.07 | Hold or reassess |
+| +2% | $427.46 | Entry → Profit target watch |
+| +1% | $423.27 | Entry → Profit target watch |
+| -1% | $414.89 | Hold or reassess |
+| -2% | $410.70 | Hold or reassess |
 
 **Max Risk:** $1,000.00 | **Contracts:** 4
 
@@ -443,10 +443,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $270.16 | Entry → Profit target watch |
-| +1% | $267.51 | Entry → Profit target watch |
-| -1% | $262.21 | Hold or reassess |
-| -2% | $259.56 | Hold or reassess |
+| +2% | $263.96 | Entry → Profit target watch |
+| +1% | $261.37 | Entry → Profit target watch |
+| -1% | $256.19 | Hold or reassess |
+| -2% | $253.60 | Hold or reassess |
 
 **Max Risk:** $762.00 | **Contracts:** 6
 
@@ -464,10 +464,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $404.88 | Entry → Profit target watch |
-| +1% | $400.91 | Entry → Profit target watch |
-| -1% | $392.97 | Hold or reassess |
-| -2% | $389.00 | Hold or reassess |
+| +2% | $399.47 | Entry → Profit target watch |
+| +1% | $395.56 | Entry → Profit target watch |
+| -1% | $387.72 | Hold or reassess |
+| -2% | $383.81 | Hold or reassess |
 
 **Max Risk:** $765.00 | **Contracts:** 3
 
@@ -485,10 +485,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $429.41 | Entry → Profit target watch |
-| +1% | $425.20 | Entry → Profit target watch |
-| -1% | $416.78 | Hold or reassess |
-| -2% | $412.57 | Hold or reassess |
+| +2% | $431.87 | Entry → Profit target watch |
+| +1% | $427.63 | Entry → Profit target watch |
+| -1% | $419.17 | Hold or reassess |
+| -2% | $414.93 | Hold or reassess |
 
 **Max Risk:** $1,190.00 | **Contracts:** 2
 
@@ -506,10 +506,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $753.42 | Entry → Profit target watch |
-| +1% | $746.04 | Entry → Profit target watch |
-| -1% | $731.26 | Hold or reassess |
-| -2% | $723.88 | Hold or reassess |
+| +2% | $752.19 | Entry → Profit target watch |
+| +1% | $744.81 | Entry → Profit target watch |
+| -1% | $730.06 | Hold or reassess |
+| -2% | $722.69 | Hold or reassess |
 
 **Max Risk:** $2,114.00 | **Contracts:** 7
 
@@ -527,10 +527,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $720.00 | Entry → Profit target watch |
-| +1% | $712.94 | Entry → Profit target watch |
-| -1% | $698.82 | Hold or reassess |
-| -2% | $691.76 | Hold or reassess |
+| +2% | $720.24 | Entry → Profit target watch |
+| +1% | $713.18 | Entry → Profit target watch |
+| -1% | $699.06 | Hold or reassess |
+| -2% | $692.00 | Hold or reassess |
 
 **Max Risk:** $2,284.00 | **Contracts:** 4
 
@@ -548,10 +548,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $303.80 | Entry → Profit target watch |
-| +1% | $300.82 | Entry → Profit target watch |
-| -1% | $294.86 | Hold or reassess |
-| -2% | $291.88 | Hold or reassess |
+| +2% | $304.16 | Entry → Profit target watch |
+| +1% | $301.18 | Entry → Profit target watch |
+| -1% | $295.21 | Hold or reassess |
+| -2% | $292.23 | Hold or reassess |
 
 **Max Risk:** $640.00 | **Contracts:** 5
 
@@ -569,10 +569,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $753.42 | Entry → Profit target watch |
-| +1% | $746.04 | Entry → Profit target watch |
-| -1% | $731.26 | Hold or reassess |
-| -2% | $723.88 | Hold or reassess |
+| +2% | $752.17 | Entry → Profit target watch |
+| +1% | $744.80 | Entry → Profit target watch |
+| -1% | $730.05 | Hold or reassess |
+| -2% | $722.68 | Hold or reassess |
 
 **Max Risk:** $2,114.00 | **Contracts:** 7
 
@@ -590,10 +590,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $720.00 | Entry → Profit target watch |
-| +1% | $712.94 | Entry → Profit target watch |
-| -1% | $698.82 | Hold or reassess |
-| -2% | $691.76 | Hold or reassess |
+| +2% | $720.24 | Entry → Profit target watch |
+| +1% | $713.18 | Entry → Profit target watch |
+| -1% | $699.06 | Hold or reassess |
+| -2% | $692.00 | Hold or reassess |
 
 **Max Risk:** $2,284.00 | **Contracts:** 4
 
@@ -611,10 +611,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $61.79 | Entry → Profit target watch |
-| +1% | $61.19 | Entry → Profit target watch |
-| -1% | $59.97 | Hold or reassess |
-| -2% | $59.37 | Hold or reassess |
+| +2% | $62.30 | Entry → Profit target watch |
+| +1% | $61.69 | Entry → Profit target watch |
+| -1% | $60.47 | Hold or reassess |
+| -2% | $59.86 | Hold or reassess |
 
 **Max Risk:** $960.00 | **Contracts:** 20
 
@@ -632,10 +632,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $226.77 | Entry → Profit target watch |
-| +1% | $224.54 | Entry → Profit target watch |
-| -1% | $220.10 | Hold or reassess |
-| -2% | $217.87 | Hold or reassess |
+| +2% | $228.30 | Entry → Profit target watch |
+| +1% | $226.06 | Entry → Profit target watch |
+| -1% | $221.58 | Hold or reassess |
+| -2% | $219.34 | Hold or reassess |
 
 **Max Risk:** $1,840.00 | **Contracts:** 16
 
@@ -653,10 +653,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $303.80 | Entry → Profit target watch |
-| +1% | $300.82 | Entry → Profit target watch |
-| -1% | $294.86 | Hold or reassess |
-| -2% | $291.88 | Hold or reassess |
+| +2% | $304.16 | Entry → Profit target watch |
+| +1% | $301.18 | Entry → Profit target watch |
+| -1% | $295.21 | Hold or reassess |
+| -2% | $292.23 | Hold or reassess |
 
 **Max Risk:** $640.00 | **Contracts:** 5
 
@@ -674,10 +674,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $753.42 | Entry → Profit target watch |
-| +1% | $746.04 | Entry → Profit target watch |
-| -1% | $731.26 | Hold or reassess |
-| -2% | $723.88 | Hold or reassess |
+| +2% | $752.19 | Entry → Profit target watch |
+| +1% | $744.81 | Entry → Profit target watch |
+| -1% | $730.06 | Hold or reassess |
+| -2% | $722.69 | Hold or reassess |
 
 **Max Risk:** $2,114.00 | **Contracts:** 7
 
@@ -695,10 +695,10 @@ Based on yesterday's scan (2026-05-18). Prices are premarket.
 
 | Scenario | Price | Action |
 |----------|-------|--------|
-| +2% | $753.42 | Entry → Profit target watch |
-| +1% | $746.04 | Entry → Profit target watch |
-| -1% | $731.26 | Hold or reassess |
-| -2% | $723.88 | Hold or reassess |
+| +2% | $752.19 | Entry → Profit target watch |
+| +1% | $744.81 | Entry → Profit target watch |
+| -1% | $730.06 | Hold or reassess |
+| -2% | $722.69 | Hold or reassess |
 
 **Max Risk:** $2,114.00 | **Contracts:** 7
 
