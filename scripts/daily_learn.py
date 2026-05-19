@@ -64,6 +64,76 @@ def _latest_backtest_path() -> Path | None:
     return results[-1] if results else None
 
 
+# ----- Static blacklist auto-sync -------------------------------------------
+
+def _derive_static_blacklist(kb: KnowledgeBase) -> tuple[list[str], dict[str, float]]:
+    """From a KB, derive the static blacklist + quality-score dict.
+
+    The blacklist UNIONS:
+      - KB-driven: tickers meeting KB.is_blacklisted() criteria (n>=30, hit<43%, $win<45%)
+      - Code fallback: tickers in oa2.strategy.quality_gates._FALLBACK_BLACKLIST
+        (safety net so a KB rebuild can never silently drop hard-earned bans)
+
+    Quality scores combine KB multipliers (when n>=20) with the code fallback
+    for tickers the KB hasn't seen.
+
+    Returns:
+        (sorted blacklist tickers, full ticker->multiplier dict)
+    """
+    from oa2.learning.knowledge_base import (
+        _ticker_blacklisted, _ticker_multiplier, MIN_OBS_FOR_MULT,
+    )
+    from oa2.strategy.quality_gates import _FALLBACK_BLACKLIST, _FALLBACK_QUALITY_SCORE
+
+    blacklist: set[str] = set()
+    scores: dict[str, float] = {}
+
+    # Start with code-fallback values (safety net)
+    blacklist.update(_FALLBACK_BLACKLIST)
+    scores.update(_FALLBACK_QUALITY_SCORE)
+
+    # Overlay KB findings (KB wins on tickers with enough trades)
+    for ticker, stats in kb.tickers.items():
+        t = ticker.upper()
+        if _ticker_blacklisted(stats):
+            blacklist.add(t)
+            scores[t] = 0.0
+        elif stats.n_trades >= MIN_OBS_FOR_MULT:
+            scores[t] = round(_ticker_multiplier(stats), 4)
+            # If KB now disagrees with fallback (says ticker is OK), we still
+            # keep it in blacklist union -- code fallback is a "ratchet". To
+            # remove a ticker from the static fallback, edit quality_gates.py.
+
+    # Blacklisted tickers always score 0 regardless of KB multiplier
+    for t in blacklist:
+        scores[t] = 0.0
+
+    return sorted(blacklist), scores
+
+
+def _write_static_blacklist(kb: KnowledgeBase, dry_run: bool) -> Path:
+    """Write ~/.oa2/static_blacklist.json from the current KB."""
+    from oa2.strategy.quality_gates import _static_blacklist_path
+
+    tickers, scores = _derive_static_blacklist(kb)
+    payload = {
+        "schema_version": 1,
+        "last_synced": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "source": "daily_learn.py auto-sync from KB",
+        "n_tickers_evaluated": len(kb.tickers),
+        "tickers": tickers,
+        "quality_scores": scores,
+    }
+    path = _static_blacklist_path()
+    if not dry_run:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic write (.tmp + rename)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    return path
+
+
 # ----- Merge logic ----------------------------------------------------------
 
 def _merge_kbs(primary: KnowledgeBase, secondary: KnowledgeBase) -> KnowledgeBase:
@@ -225,6 +295,25 @@ def main() -> int:
         print(f"KB written: {kb_path}")
     else:
         print(f"(dry-run: would write to {kb_path})")
+
+    # Auto-sync the static blacklist + quality scores so pipeline picks up
+    # KB-derived values on next process start (no code change needed).
+    bl_path = _write_static_blacklist(kb, dry_run=args.dry_run)
+    bl_tickers, _ = _derive_static_blacklist(kb)
+    if not args.dry_run:
+        print(f"Static blacklist synced: {bl_path} ({len(bl_tickers)} tickers blacklisted)")
+        if bl_tickers:
+            print(f"  Blacklisted: {', '.join(bl_tickers)}")
+        # Reload in-process (helps when daily_learn is imported, harmless otherwise)
+        try:
+            from oa2.strategy.quality_gates import reload_blacklist_from_disk
+            reload_blacklist_from_disk()
+        except Exception:
+            pass
+    else:
+        print(f"(dry-run: would write blacklist to {bl_path})")
+        if bl_tickers:
+            print(f"  Would blacklist: {', '.join(bl_tickers)}")
 
     # Generate report
     report = _report_markdown(kb)
