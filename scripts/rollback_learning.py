@@ -14,11 +14,11 @@ import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from oa2.learning.versioning import (
+from tradingbot.learning.versioning import (
     diff_kb, diff_bandit, kb_path, bandit_path, list_versions,
     restore_kb, restore_bandit, learning_events_path, _version_dir
 )
-from oa2.core.config import oa2_home
+from tradingbot.core.config import tradingbot_home
 
 ET = ZoneInfo("America/New_York")
 

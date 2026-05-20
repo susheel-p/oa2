@@ -432,7 +432,7 @@ class MoomooFlowAdapter(FlowAdapterBase):
 
             # DEBUG: Log what we got
             import logging as _logging
-            _log = _logging.getLogger("oa2.flow_adapter")
+            _log = _logging.getLogger("tradingbot.flow_adapter")
             _log.warning(f"[{ticker}] Flow analysis: quality={flow_analysis.get('data_quality')}, pcr={flow_analysis.get('put_call_ratio')}, call_conc={flow_analysis.get('call_vol_concentration'):.1f}%, put_conc={flow_analysis.get('put_vol_concentration'):.1f}%")
 
             # Populate FlowData from moomoo analysis

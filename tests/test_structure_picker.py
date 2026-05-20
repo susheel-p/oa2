@@ -1,4 +1,4 @@
-"""Tests for oa2.strategy.structure_picker."""
+"""Tests for tradingbot.strategy.structure_picker."""
 
 from __future__ import annotations
 

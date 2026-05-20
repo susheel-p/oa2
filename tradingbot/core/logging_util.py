@@ -19,7 +19,7 @@ class PipelineLogger:
     def __init__(self, detail_logging: bool = False, ticker: str = ""):
         self.detail_logging = detail_logging
         self.ticker = ticker
-        self.logger = logging.getLogger("oa2.pipeline")
+        self.logger = logging.getLogger("tradingbot.pipeline")
 
         # Configure handler if not already done
         if not self.logger.handlers:

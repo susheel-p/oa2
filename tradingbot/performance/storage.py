@@ -31,7 +31,7 @@ def save_posteriors(posteriors: dict[tuple[str, int], BetaPosterior], path: Path
     # Snapshot the current posteriors before overwriting
     if path.exists():
         try:
-            from oa2.learning.versioning import snapshot_bandit
+            from tradingbot.learning.versioning import snapshot_bandit
             snapshot_bandit("save_posteriors")
         except Exception:
             pass

@@ -26,7 +26,7 @@ _ET = ZoneInfo("America/New_York")
 
 
 class Clock(Protocol):
-    """Minimal time interface used across oa2."""
+    """Minimal time interface used across tradingbot."""
 
     def now(self) -> float:
         """Unix timestamp (seconds since epoch). Equivalent of time.time()."""

@@ -34,7 +34,7 @@ from tradingbot.learning.knowledge_base import (
     build_from_outcomes,
     default_kb_path,
 )
-from oa2.learning.versioning import (
+from tradingbot.learning.versioning import (
     snapshot_kb, snapshot_bandit, diff_kb, diff_bandit,
     learning_events_path, kb_path, bandit_path,
 )

@@ -4,9 +4,9 @@ Archives KB and bandit snapshots before each overwrite, computes diffs,
 and enables rollback to any past state.
 
 Paths:
-  ~/.oa2/kb_versions/kb_<YYYY-MM-DD_HHMMSS>.json
-  ~/.oa2/bandit_versions/posteriors_<YYYY-MM-DD_HHMMSS>.json
-  ~/.oa2/learning_events.jsonl
+  ~/.tradingbot/kb_versions/kb_<YYYY-MM-DD_HHMMSS>.json
+  ~/.tradingbot/bandit_versions/posteriors_<YYYY-MM-DD_HHMMSS>.json
+  ~/.tradingbot/learning_events.jsonl
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from oa2.core.config import oa2_home
+from tradingbot.core.config import tradingbot_home
 
 
 @dataclass
@@ -78,7 +78,7 @@ class BanditDiff:
 
 def _version_dir(subdir: str) -> Path:
     """Get or create a version archive subdirectory."""
-    base = oa2_home()
+    base = tradingbot_home()
     d = base / subdir
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -91,17 +91,17 @@ def _now_str() -> str:
 
 def kb_path() -> Path:
     """Current KB path."""
-    return oa2_home() / "knowledge_base.json"
+    return tradingbot_home() / "knowledge_base.json"
 
 
 def bandit_path() -> Path:
     """Current bandit posteriors path."""
-    return oa2_home() / "bandit" / "posteriors.json"
+    return tradingbot_home() / "bandit" / "posteriors.json"
 
 
 def learning_events_path() -> Path:
     """Append-only event log."""
-    return oa2_home() / "learning_events.jsonl"
+    return tradingbot_home() / "learning_events.jsonl"
 
 
 def snapshot_kb(reason: str = "daily_learn") -> str:
