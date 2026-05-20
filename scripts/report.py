@@ -105,6 +105,15 @@ def _write_report(path: Path, content: str) -> None:
     _log(f"Wrote {path}")
 
 
+def _load_executions(log_dir: Path, date_str: str) -> tuple[list[dict], list[dict]]:
+    """Load executions_{date}.jsonl, split into (entry_records, exit_records)."""
+    all_recs = _load_jsonl(log_dir / f"executions_{date_str}.jsonl")
+    return (
+        [r for r in all_recs if r.get("event") == "ENTRY"],
+        [r for r in all_recs if r.get("event") == "EXIT"],
+    )
+
+
 def _get_day_reports_dir(date_str: str, reports_dir: Path) -> Path:
     """Get the reports directory for a specific date."""
     return reports_dir / date_str
@@ -219,6 +228,33 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
     lines.append(f"- Currently open positions: {len(open_positions)}")
     lines.append("")
 
+    # Load executions to cross-reference with approvals
+    entry_execs, _ = _load_executions(log_dir, scan_date)
+    entry_exec_tickers = {e.get("ticker"): e for e in entry_execs}
+
+    # Execution status cross-reference
+    lines.append("## Execution Status of Yesterday's Approvals")
+    lines.append("")
+    if entry_execs or approved:
+        lines.append("| Ticker | Approved | Executed | Fill Status |")
+        lines.append("|--------|----------|----------|-------------|")
+        for rec in approved:
+            ticker = rec.get("ticker", "?")
+            exec_rec = entry_exec_tickers.get(ticker)
+            if exec_rec:
+                legs = exec_rec.get("legs", [])
+                leg_status = ", ".join(
+                    f"leg{l.get('leg')}={l.get('status', '?')}"
+                    for l in legs if not l.get("error")
+                ) or "error"
+                lines.append(f"| {ticker} | YES | YES | {leg_status} |")
+            else:
+                lines.append(f"| {ticker} | YES | NO | (not submitted) |")
+        lines.append("")
+    else:
+        lines.append("No execution data available.")
+        lines.append("")
+
     if open_positions:
         lines.append("## Open Positions from Yesterday")
         lines.append("")
@@ -325,7 +361,7 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
 # =============================================================================
 
 def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None, reports_dir: Path | None = None) -> None:
-    """Generate postmarket report for date (default: today)."""
+    """Generate postmarket report for date (default: today) with 4-section audit trail."""
     if log_dir is None:
         log_dir = _get_log_dir()
     if reports_dir is None:
@@ -335,7 +371,6 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
     log_file = log_dir / f"paper_trade_{report_date}.jsonl"
     summary_file = log_dir / f"summary_{report_date}.json"
     positions_file = log_dir / f"positions_{report_date}.json"
-    exits_file = log_dir / f"exit_alerts_{report_date}.jsonl"
 
     _log(f"Generating postmarket report for {report_date}")
 
@@ -346,7 +381,7 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
     scan_records = _load_jsonl(log_file)
     summary_data = _load_json(summary_file) or {}
     positions_data = _load_json(positions_file) or []
-    exit_alerts = _load_jsonl(exits_file)
+    entry_execs, exit_execs = _load_executions(log_dir, report_date)
 
     approved_recs = [r for r in scan_records if r.get("status") == "sized_approved"]
     rejected_recs = [r for r in scan_records if r.get("status") == "sized_rejected"]
@@ -357,44 +392,92 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
     lines.append(f"Generated: {_now_et().strftime('%Y-%m-%d %H:%M:%S %Z')}")
     lines.append("")
 
-    lines.append("## Day Summary")
+    # Section 1: Signal Scan Summary
+    lines.append("## Signal Scan")
     lines.append("")
-    lines.append(f"- Scanned: {summary_data.get('tickers_scanned', len(scan_records))} tickers")
-    lines.append(f"- Approved: {summary_data.get('approved_count', len(approved_recs))} trades")
+    lines.append(f"- Tickers scanned: {summary_data.get('tickers_scanned', len(scan_records))}")
+    lines.append(f"- Approved for trading: {summary_data.get('approved_count', len(approved_recs))}")
     lines.append(f"- Rejected: {summary_data.get('rejected_count', len(rejected_recs))}")
-    lines.append(f"- Exit alerts: {summary_data.get('exit_alert_count', len(exit_alerts))}")
     lines.append("")
 
-    if positions_data:
-        lines.append("## Trades Entered")
+    # Section 2: Executed Trades
+    lines.append("## Executed Trades")
+    lines.append("")
+    if entry_execs:
+        lines.append("| Time | Ticker | Direction | Structure | Contracts | Leg Status | Trigger |")
+        lines.append("|------|--------|-----------|-----------|-----------|-----------|---------|")
+        for exec_rec in entry_execs:
+            ts = exec_rec.get("ts", "?")[:16]
+            ticker = exec_rec.get("ticker", "?")
+            direction = exec_rec.get("direction", "?")
+            structure = exec_rec.get("structure", "?")
+            contracts = exec_rec.get("contracts", 0)
+            legs = exec_rec.get("legs", [])
+            leg_summary = ", ".join(
+                f"leg{l.get('leg')}={l.get('status', '?')}@{l.get('avg_fill_price', 0):.2f}"
+                for l in legs if not l.get("error")
+            ) or "error"
+            trigger = exec_rec.get("trigger", "?")
+            lines.append(f"| {ts} | {ticker} | {direction} | {structure} | {contracts} | {leg_summary} | {trigger} |")
         lines.append("")
-        lines.append("| Ticker | Direction | Structure | Entry Price | Contracts | Max Risk |")
-        lines.append("|--------|-----------|-----------|-------------|-----------|----------|")
+    elif positions_data:
+        lines.append("*No execution log found; showing position snapshot.*")
+        lines.append("")
+        lines.append("| Ticker | Direction | Structure | Contracts |")
+        lines.append("|--------|-----------|-----------|-----------|")
         for pos in positions_data:
             if not isinstance(pos, dict):
                 continue
-            ticker = pos.get("ticker", "?")
-            direction = pos.get("direction", "?")
-            structure = pos.get("structure", "?")
-            entry_price = pos.get("entry_price", 0)
-            contracts = pos.get("contracts", 0)
-            max_loss = pos.get("max_loss_per_contract", 0) * contracts
-            lines.append(f"| {ticker} | {direction} | {structure} | {_fmt_price(entry_price)} | {contracts} | {_fmt_dollar(max_loss)} |")
+            lines.append(f"| {pos.get('ticker', '?')} | {pos.get('direction', '?')} | {pos.get('structure', '?')} | {pos.get('contracts', 0)} |")
+        lines.append("")
+    else:
+        lines.append("No executed trades today.")
         lines.append("")
 
-    if exit_alerts:
-        lines.append("## Exit Events")
+    # Section 3: Exit Events
+    lines.append("## Exit Events")
+    lines.append("")
+    if exit_execs:
+        lines.append("| Time | Ticker | Reason | Urgency | P&L |")
+        lines.append("|------|--------|--------|---------|-----|")
+        for exit_rec in exit_execs:
+            ts = exit_rec.get("ts", "?")[:16]
+            ticker = exit_rec.get("ticker", "?")
+            reason = exit_rec.get("exit_reason", "?")
+            urgency = exit_rec.get("exit_urgency", "?")
+            pnl = exit_rec.get("current_pnl", 0)
+            lines.append(f"| {ts} | {ticker} | {reason} | {urgency} | {_fmt_dollar(pnl)} |")
         lines.append("")
-        lines.append("| Time | Ticker | Reason | P&L |")
-        lines.append("|------|--------|--------|-----|")
-        for alert in exit_alerts:
-            ts = alert.get("ts", "?")[:16]
-            ticker = alert.get("ticker", "?")
-            reason = alert.get("reason", "?")
-            pnl = alert.get("current_pnl", 0)
-            lines.append(f"| {ts} | {ticker} | {reason} | {_fmt_dollar(pnl)} |")
+    else:
+        lines.append("No exit events today.")
         lines.append("")
 
+    # Section 4: Live Broker Positions
+    lines.append("## Live Broker Positions")
+    lines.append("")
+    try:
+        from oa2.dataflows.moomoo_data import fetch_account_positions
+        live_positions = fetch_account_positions()
+    except Exception:
+        live_positions = []
+
+    if live_positions:
+        lines.append("| Symbol | Qty | Cost | Market Value | P&L | Today P&L |")
+        lines.append("|--------|-----|------|--------------|-----|-----------|")
+        for pos in live_positions:
+            code = pos.get("code", "?")
+            qty = pos.get("qty", 0)
+            cost = pos.get("cost_price", 0)
+            market_val = pos.get("market_val", 0)
+            pl_val = pos.get("pl_val", 0)
+            today_pl = pos.get("today_pl_val", 0)
+            lines.append(f"| {code} | {qty} | {_fmt_price(cost)} | {_fmt_dollar(market_val)} | {_fmt_dollar(pl_val)} | {_fmt_dollar(today_pl)} |")
+        lines.append("")
+    else:
+        lines.append("No open positions in broker account (or OpenD not reachable).")
+        lines.append("")
+
+    # Watch list
     if rejected_recs:
         lines.append("## Watch List — Almost Traded")
         lines.append("")
@@ -424,7 +507,7 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
         scan_records=scan_records,
         summary_data=summary_data,
         positions_data=positions_data,
-        exit_alerts=exit_alerts,
+        exit_alerts=[],  # Updated to use executions instead, but keep for compat
         approved_recs=approved_recs,
         rejected_recs=rejected_recs,
     )
@@ -668,6 +751,54 @@ def generate_trade_doc(trade_id: str, date_str: str | None = None, log_dir: Path
         price = _compute_scenario_price(current_price, pct_move)
         lines.append(f"| +{pct_move}% to {_fmt_price(price)} | {result} |")
     lines.append("")
+
+    # Broker fills (entry)
+    entry_execs, exit_execs = _load_executions(log_dir, doc_date)
+    entry_rec = next((e for e in entry_execs if e.get("trade_id") == trade_id), None)
+    if entry_rec:
+        lines.append("## Broker Fills (Entry)")
+        lines.append("")
+        legs = entry_rec.get("legs", [])
+        if legs:
+            lines.append("| Leg | Side | Strike | Right | Qty | Status | Fill Price | Fill Time |")
+            lines.append("|-----|------|--------|-------|-----|--------|-----------|-----------|")
+            for leg in legs:
+                if not leg.get("error"):
+                    leg_num = leg.get("leg", "?")
+                    side = "BUY" if leg.get("side", 0) > 0 else "SELL"
+                    strike = leg.get("strike", "?")
+                    right = leg.get("right", "?")
+                    qty = leg.get("qty", 0)
+                    status = leg.get("status", "?")
+                    fill_price = leg.get("avg_fill_price", 0)
+                    fill_time = leg.get("fill_time", "N/A") or "N/A"
+                    lines.append(f"| {leg_num} | {side} | {strike} | {right} | {qty} | {status} | {_fmt_price(fill_price)} | {fill_time} |")
+            lines.append("")
+
+    # Broker fills (exit) if exists
+    exit_rec = next((e for e in exit_execs if e.get("trade_id") == trade_id), None)
+    if exit_rec:
+        lines.append("## Broker Fills (Exit)")
+        lines.append("")
+        lines.append(f"Closed: {exit_rec.get('exit_reason', '?')} (Urgency: {exit_rec.get('exit_urgency', '?')})")
+        lines.append(f"Realized P&L: {_fmt_dollar(exit_rec.get('current_pnl', 0))}")
+        lines.append("")
+        legs = exit_rec.get("legs", [])
+        if legs:
+            lines.append("| Leg | Side | Strike | Right | Qty | Status | Fill Price | Fill Time |")
+            lines.append("|-----|------|--------|-------|-----|--------|-----------|-----------|")
+            for leg in legs:
+                if not leg.get("error"):
+                    leg_num = leg.get("leg", "?")
+                    side = "BUY" if leg.get("side", 0) > 0 else "SELL"
+                    strike = leg.get("strike", "?")
+                    right = leg.get("right", "?")
+                    qty = leg.get("qty", 0)
+                    status = leg.get("status", "?")
+                    fill_price = leg.get("avg_fill_price", 0)
+                    fill_time = leg.get("fill_time", "N/A") or "N/A"
+                    lines.append(f"| {leg_num} | {side} | {strike} | {right} | {qty} | {status} | {_fmt_price(fill_price)} | {fill_time} |")
+            lines.append("")
 
     lines.append("## How It Resolved")
     lines.append("")

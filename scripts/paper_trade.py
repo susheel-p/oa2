@@ -87,6 +87,17 @@ def _log(msg: str) -> None:
     print(f"[{_ts()}] {msg}", flush=True)
 
 
+def _log_execution(record: dict) -> None:
+    """Append one execution event to logs/executions_{date}.jsonl. Never raises."""
+    path = LOG_DIR / f"executions_{_today_str()}.jsonl"
+    try:
+        with open(path, "a") as f:
+            f.write(json.dumps(record, default=str) + "\n")
+            f.flush()
+    except Exception as e:
+        _log(f"[EXEC LOG] write failed: {e}")
+
+
 def _is_market_day() -> bool:
     """Return False on weekends. Does not check public holidays."""
     return _now_et().weekday() < 5
@@ -175,6 +186,7 @@ def _submit_to_broker(ticker: str, decision: dict, structure_pick: dict) -> list
                 "right": leg.right, "qty": leg.contracts,
                 "leg_id": fill.leg_id, "status": fill.status.value,
                 "filled_qty": fill.filled_qty, "avg_fill_price": fill.avg_fill_price,
+                "fill_time": fill.fill_time,
                 "error": fill.error,
             })
         except Exception as e:
@@ -217,6 +229,7 @@ def _close_position_on_broker(pos: OpenPosition) -> list[dict]:
                 "right": leg.right, "qty": close_leg.contracts,
                 "leg_id": fill.leg_id, "status": fill.status.value,
                 "filled_qty": fill.filled_qty, "avg_fill_price": fill.avg_fill_price,
+                "fill_time": fill.fill_time,
                 "error": fill.error,
             })
         except Exception as e:
@@ -251,6 +264,23 @@ def _process_exit_alerts(
                                 f"{f['qty']}x {ticker} {f['strike']}{f['right']} "
                                 f"-> {f['status']} (oid={f['leg_id']})"
                             )
+
+                # Log execution event (EXIT)
+                _log_execution({
+                    "ts": _ts(),
+                    "event": "EXIT",
+                    "trigger": "dry_run" if dry_run else "exit_only",
+                    "trade_id": trade_id,
+                    "ticker": ticker,
+                    "direction": None,
+                    "structure": None,
+                    "contracts": len(pos.legs),
+                    "dry_run": dry_run,
+                    "legs": fills,
+                    "exit_reason": alert.get("reason"),
+                    "exit_urgency": alert.get("urgency"),
+                    "current_pnl": alert.get("current_pnl"),
+                })
                 monitor.remove(trade_id)
                 if book is not None:
                     book.remove_position(trade_id)
@@ -583,6 +613,23 @@ def main() -> None:
                 regime = result.get("regime") or {}
 
                 trade_id = exit_rules.get("trade_id") or uuid.uuid4().hex[:12]
+
+                # Log execution event (ENTRY)
+                _log_execution({
+                    "ts": _ts(),
+                    "event": "ENTRY",
+                    "trigger": "dry_run" if args.dry_run else "full_scan",
+                    "trade_id": trade_id,
+                    "ticker": ticker,
+                    "direction": decision.get("direction"),
+                    "structure": struct_pick.get("structure"),
+                    "contracts": contracts,
+                    "dry_run": args.dry_run,
+                    "legs": fills,
+                    "exit_reason": None,
+                    "exit_urgency": None,
+                    "current_pnl": None,
+                })
 
                 # Expiry string parsing
                 import datetime as _dt

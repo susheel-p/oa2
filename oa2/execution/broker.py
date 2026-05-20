@@ -62,6 +62,7 @@ class LegFill:
     status: LegStatus
     filled_qty: int = 0
     avg_fill_price: float = 0.0
+    fill_time: str | None = None  # ISO timestamp from broker dealt_time (if available)
     error: str | None = None
 
 

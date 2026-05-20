@@ -301,9 +301,16 @@ class MoomooBroker:
     def _row_to_fill(row: Any, leg_id: str) -> LegFill:
         moomoo_status = row.get("order_status")
         status = _STATUS_MAP.get(moomoo_status, LegStatus.WORKING)
+
+        raw_time = row.get("dealt_time")
+        fill_time: str | None = None
+        if raw_time and str(raw_time).strip() not in ("", "N/A", "nan"):
+            fill_time = str(raw_time).strip()
+
         return LegFill(
             leg_id=leg_id,
             status=status,
             filled_qty=int(row.get("dealt_qty", 0) or 0),
             avg_fill_price=float(row.get("dealt_avg_price", 0) or 0.0),
+            fill_time=fill_time,
         )

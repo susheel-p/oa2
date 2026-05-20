@@ -675,3 +675,80 @@ def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
     except Exception as e:
         warnings.warn(f"Error fetching market snapshot for {ticker}: {e}")
         return {"ticker": ticker, "error": str(e)}
+
+
+def fetch_account_positions(trd_env_str: str | None = None, acc_id: int = 0) -> list[dict]:
+    """Fetch live open positions from moomoo account via position_list_query().
+
+    Opens its own OpenSecTradeContext, calls position_list_query(), closes immediately.
+    Never raises; returns empty list on any failure.
+
+    Args:
+        trd_env_str: "SIMULATE" (default) or "REAL" — reads OA2_TRADE_ENV if None
+        acc_id: moomoo account ID — reads MOOMOO_ACCOUNT_ID from env if 0
+
+    Returns:
+        List of position dicts with: code, stock_name, qty, cost_price, market_val,
+        pl_val, pl_ratio, today_pl_val, currency, position_side
+    """
+    if not MOOMOO_AVAILABLE:
+        logger.warning("moomoo SDK not installed; fetch_account_positions returning []")
+        return []
+
+    if trd_env_str is None:
+        trd_env_str = os.getenv("OA2_TRADE_ENV", "SIMULATE")
+    if acc_id == 0:
+        try:
+            acc_id = int(os.getenv("MOOMOO_ACCOUNT_ID", "0"))
+        except (ValueError, TypeError):
+            acc_id = 0
+
+    try:
+        from moomoo import OpenSecTradeContext, TrdMarket, SecurityFirm
+    except ImportError:
+        logger.warning("OpenSecTradeContext import failed; fetch_account_positions returning []")
+        return []
+
+    trd_env = ft.TrdEnv.SIMULATE if trd_env_str == "SIMULATE" else ft.TrdEnv.REAL
+    ctx = None
+    try:
+        ctx = OpenSecTradeContext(
+            filter_trdmarket=TrdMarket.US,
+            host=os.getenv("MOOMOO_OPEND_HOST", "127.0.0.1"),
+            port=int(os.getenv("MOOMOO_OPEND_PORT", "11111")),
+            security_firm=SecurityFirm.FUTUINC,
+        )
+        ret, df = ctx.position_list_query(
+            trd_env=trd_env,
+            acc_id=acc_id,
+        )
+        if ret != 0 or df is None or (hasattr(df, "empty") and df.empty):
+            logger.warning(f"position_list_query returned ret={ret}; returning []")
+            return []
+
+        positions = []
+        for _, row in df.iterrows():
+            positions.append({
+                "code": str(row.get("code", "")),
+                "stock_name": str(row.get("stock_name", "")),
+                "qty": int(row.get("qty", 0) or 0),
+                "can_sell_qty": int(row.get("can_sell_qty", 0) or 0),
+                "cost_price": float(row.get("cost_price", 0) or 0.0),
+                "market_val": float(row.get("market_val", 0) or 0.0),
+                "pl_val": float(row.get("pl_val", 0) or 0.0),
+                "pl_ratio": float(row.get("pl_ratio", 0) or 0.0),
+                "today_pl_val": float(row.get("today_pl_val", 0) or 0.0),
+                "currency": str(row.get("currency", "USD")),
+                "position_side": str(row.get("position_side", "")),
+            })
+        return positions
+
+    except Exception as exc:
+        logger.warning(f"fetch_account_positions failed: {exc}")
+        return []
+    finally:
+        if ctx is not None:
+            try:
+                ctx.close()
+            except Exception:
+                pass
