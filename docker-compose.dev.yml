@@ -1,0 +1,20 @@
+# Development override for docker-compose.yml
+# Enables hot-reload by bind-mounting entire source code
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  oa2-daemon:
+    build:
+      target: dev
+    # Full source code bind mount for live editing (no rebuild needed)
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - oa2-data:/data/oa2
+    # Use market_monitor directly instead of supervisord (easier to debug)
+    command: python scripts/market_monitor.py
+    # Less strict restart policy for development
+    restart: on-failure

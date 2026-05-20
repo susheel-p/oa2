@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  oa2-daemon:
+    build:
+      context: .
+      target: prod
+      dockerfile: Dockerfile
+    image: oa2-daemon:latest
+    container_name: oa2-daemon
+    restart: unless-stopped
+
+    # Load .env file for broker credentials and other config
+    env_file: .env
+
+    # Override/set specific environment variables for Docker
+    environment:
+      - TZ=America/New_York
+      - OA2_HOME=/data/oa2
+      - REPORTS_DIR=/app/reports
+      - MOOMOO_OPEND_HOST=host.docker.internal
+      - PYTHONUNBUFFERED=1
+
+    # Volume mounts
+    volumes:
+      # Logs: bind to local ./logs for easy access
+      - ./logs:/app/logs
+
+      # Reports: bind to local ./reports for viewing daily/weekly markdown
+      - ./reports:/app/reports
+
+      # Persistent oa2 data: outcomes, KB, calibration, bandit priors
+      # Use named Docker volume (survives container restart)
+      - oa2-data:/data/oa2
+
+    # Allow container to reach host's moomoo OpenD (port 11111)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # Health check: ensure daemon heartbeat is fresh
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/logs/daemon_heartbeat.txt"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# Named volume for persistent ML state (knowledge base, outcomes, calibration)
+volumes:
+  oa2-data:
+    driver: local

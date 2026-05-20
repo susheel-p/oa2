@@ -168,6 +168,7 @@ class MarketMonitor:
         self.premarket_done_today = False
         self.postmarket_done_today = False
         self.learning_loop_done_today = False
+        self.weekly_analysis_done_today = False
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
 
@@ -261,6 +262,21 @@ class MarketMonitor:
                 self.learning_loop_done_today = True
                 _log("Nightly learning loop completed successfully", self.log_file)
 
+    def _run_weekly_analysis(self) -> None:
+        """Run weekly backtest analysis on Sunday at 5:30 PM (after daily learn)."""
+        with self.lock:
+            if self.weekly_analysis_done_today:
+                return
+
+        now = _now_et()
+        _log(f"Weekly analysis trigger at {now.strftime('%H:%M:%S')} (Sunday 17:30)", self.log_file)
+
+        cmd = [sys.executable, "scripts/analyze_weekly.py"]
+        if _run_command(cmd, "WEEKLY-ANALYSIS", self.log_file):
+            with self.lock:
+                self.weekly_analysis_done_today = True
+                _log("Weekly analysis completed", self.log_file)
+
     def _reset_daily_flags(self) -> None:
         """Reset daily flags at midnight."""
         with self.lock:
@@ -268,6 +284,7 @@ class MarketMonitor:
             self.premarket_done_today = False
             self.postmarket_done_today = False
             self.learning_loop_done_today = False
+            self.weekly_analysis_done_today = False
 
     def _schedule_loop(self) -> None:
         """Main scheduling loop."""
@@ -351,6 +368,14 @@ class MarketMonitor:
                 and _is_market_day()
             ):
                 self._run_learning_loop()
+
+            # Check for weekly analysis at 5:30 PM on Sunday
+            if (
+                now.weekday() == 6  # Sunday
+                and now.hour == 17
+                and now.minute == 30
+            ):
+                self._run_weekly_analysis()
 
             # Write heartbeat for watchdog monitoring (before checking self.once)
             try:
