@@ -1,6 +1,6 @@
 from datetime import date
-from oa2.execution.broker import LegSpec
-from oa2.execution.moomoo_broker import _format_option_code
+from tradingbot.execution.broker import LegSpec
+from tradingbot.execution.moomoo_broker import _format_option_code
 
 def main():
     leg1 = LegSpec(

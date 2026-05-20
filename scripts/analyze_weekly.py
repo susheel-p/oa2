@@ -27,11 +27,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from oa2.core.config import oa2_home
+from tradingbot.core.config import tradingbot_home
 
 
 def _latest_backtest() -> Path:
-    bdir = oa2_home() / "backtest"
+    bdir = tradingbot_home() / "backtest"
     files = sorted(bdir.glob("results_*.json"))
     if not files:
         raise FileNotFoundError("No backtest results found")

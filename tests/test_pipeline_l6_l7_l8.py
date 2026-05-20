@@ -20,9 +20,9 @@ import time
 import unittest
 from unittest.mock import patch, MagicMock
 
-from oa2.graph.pipeline import run, PipelineContext
-from oa2.sizing.limits import GreeksBook
-from oa2.execution.monitor import OpenPosition, PositionMonitor
+from tradingbot.graph.pipeline import run, PipelineContext
+from tradingbot.sizing.limits import GreeksBook
+from tradingbot.execution.monitor import OpenPosition, PositionMonitor
 
 
 # =============================================================================
@@ -96,13 +96,13 @@ class TestL6SizingApproved(unittest.TestCase):
 
     def test_sized_approved_status(self):
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
             # No consensus → sizing cannot run → falls back to scaffold_only
@@ -114,10 +114,10 @@ class TestL6SizingApproved(unittest.TestCase):
         ctx.consensus = _make_bullish_consensus(p_bull=0.72)
 
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
         ):
-            from oa2.graph.pipeline import _run_sizing
+            from tradingbot.graph.pipeline import _run_sizing
             book = GreeksBook(account_size=50_000)
             result = _run_sizing(ctx, book, 50_000)
 
@@ -131,7 +131,7 @@ class TestL6SizingApproved(unittest.TestCase):
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_bullish_consensus(p_bull=0.72)
 
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
         book = GreeksBook(account_size=50_000)
         result = _run_sizing(ctx, book, 50_000)
 
@@ -143,7 +143,7 @@ class TestL6SizingApproved(unittest.TestCase):
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_bullish_consensus(p_bull=0.72)
 
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
         book = GreeksBook(account_size=50_000)
         result = _run_sizing(ctx, book, 50_000)
 
@@ -155,31 +155,31 @@ class TestL6SizingApproved(unittest.TestCase):
         self.assertGreater(kelly["edge"], 0.52)
 
     def test_bearish_consensus_also_sizes(self):
-        """Phase A1: BEARISH blocked by default; re-enable via OA2_FLAG_BEARISH=1."""
+        """Phase A1: BEARISH blocked by default; re-enable via TRADINGBOT_FLAG_BEARISH=1."""
         import os
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_bullish_consensus(p_bull=0.25, direction="BEARISH")
 
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
         book = GreeksBook(account_size=50_000)
 
-        os.environ["OA2_FLAG_BEARISH"] = "1"
+        os.environ["TRADINGBOT_FLAG_BEARISH"] = "1"
         try:
             result = _run_sizing(ctx, book, 50_000)
             # edge = 1 - 0.25 = 0.75 → should approve when BEARISH enabled
             self.assertTrue(result["approved"])
             self.assertGreater(result["contracts"], 0)
         finally:
-            os.environ.pop("OA2_FLAG_BEARISH", None)
+            os.environ.pop("TRADINGBOT_FLAG_BEARISH", None)
 
     def test_bearish_blocked_by_default(self):
-        """Phase A1: with OA2_FLAG_BEARISH unset, BEARISH consensus is rejected."""
+        """Phase A1: with TRADINGBOT_FLAG_BEARISH unset, BEARISH consensus is rejected."""
         import os
-        os.environ.pop("OA2_FLAG_BEARISH", None)
+        os.environ.pop("TRADINGBOT_FLAG_BEARISH", None)
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_bullish_consensus(p_bull=0.25, direction="BEARISH")
 
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
         book = GreeksBook(account_size=50_000)
         result = _run_sizing(ctx, book, 50_000)
 
@@ -195,7 +195,7 @@ class TestL6SizingRejected(unittest.TestCase):
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_neutral_consensus()
 
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
         book = GreeksBook(account_size=50_000)
         result = _run_sizing(ctx, book, 50_000)
 
@@ -209,7 +209,7 @@ class TestL6SizingRejected(unittest.TestCase):
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_bullish_consensus(p_bull=0.51)
 
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
         book = GreeksBook(account_size=50_000)
         result = _run_sizing(ctx, book, 50_000)
 
@@ -222,7 +222,7 @@ class TestL6SizingRejected(unittest.TestCase):
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_bullish_consensus(p_bull=0.72)
 
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
         # Fill book to near-cap: delta cap = 0.30 × 50_000 = 15_000
         book = GreeksBook(account_size=50_000)
         book.add_position("existing", "SPY", delta=14_999.0, vega=0.0, theta=0.0)
@@ -236,7 +236,7 @@ class TestL6SizingRejected(unittest.TestCase):
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_neutral_consensus()
 
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
         book = GreeksBook(account_size=50_000)
         result = _run_sizing(ctx, book, 50_000)
 
@@ -255,7 +255,7 @@ class TestL6SizingRejected(unittest.TestCase):
         }, account_size=1_000)   # tiny account
         ctx.consensus = _make_bullish_consensus(p_bull=0.72)
 
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
         book = GreeksBook(account_size=1_000)
         result = _run_sizing(ctx, book, 1_000)
 
@@ -274,13 +274,13 @@ class TestL7BookState(unittest.TestCase):
     def test_book_state_in_attribution_when_sizing_enabled(self):
         """book_state is always added to attribution when SIZING_ENGINE_ENABLED."""
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             book = GreeksBook(account_size=50_000)
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000, book=book)
@@ -295,13 +295,13 @@ class TestL7BookState(unittest.TestCase):
     def test_book_state_absent_when_sizing_disabled(self):
         """book_state must NOT appear in attribution when SIZING_ENGINE_ENABLED=False."""
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
 
@@ -309,7 +309,7 @@ class TestL7BookState(unittest.TestCase):
 
     def test_shared_book_accumulates_across_runs(self):
         """A GreeksBook passed to run() accumulates Greeks across multiple calls."""
-        from oa2.graph.pipeline import _run_sizing
+        from tradingbot.graph.pipeline import _run_sizing
 
         book = GreeksBook(account_size=50_000)
 
@@ -338,7 +338,7 @@ class TestL8ExitRuleTagging(unittest.TestCase):
     """exit_rules are tagged on decision when sizing approved."""
 
     def _run_with_approved_sizing(self) -> PipelineContext:
-        from oa2.graph.pipeline import _run_sizing, _build_exit_rules, _build_decision
+        from tradingbot.graph.pipeline import _run_sizing, _build_exit_rules, _build_decision
 
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
         ctx.consensus = _make_bullish_consensus(p_bull=0.72)
@@ -404,13 +404,13 @@ class TestL8OpenPositionAlerts(unittest.TestCase):
         monitor.add(position)
 
         with (
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, monitor=monitor)
         return ctx
@@ -454,13 +454,13 @@ class TestL8OpenPositionAlerts(unittest.TestCase):
     def test_no_monitor_means_no_alerts(self):
         """monitor=None → open_position_exits is empty."""
         with (
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, monitor=None)
         self.assertEqual(ctx.open_position_exits, [])
@@ -488,13 +488,13 @@ class TestL8OpenPositionAlerts(unittest.TestCase):
         monitor.add(pos)
 
         with (
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, monitor=monitor)
         # SPY run should not see AAPL position
@@ -510,24 +510,24 @@ class TestDecisionStatusProgression(unittest.TestCase):
 
     def _flags_off(self):
         return (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         )
 
     def test_scaffold_only_when_all_flags_off(self):
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY")
         self.assertEqual(ctx.decision["status"], "scaffold_only")
@@ -535,7 +535,7 @@ class TestDecisionStatusProgression(unittest.TestCase):
 
     def test_full_pipeline_when_consensus_but_no_sizing(self):
         """Consensus ran but SIZING_ENGINE_ENABLED=False → full_pipeline status."""
-        from oa2.graph.pipeline import _build_decision
+        from tradingbot.graph.pipeline import _build_decision
 
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA)
         ctx.consensus = _make_bullish_consensus(p_bull=0.72)
@@ -548,7 +548,7 @@ class TestDecisionStatusProgression(unittest.TestCase):
 
     def test_sized_rejected_reflected_in_decision(self):
         """Sizing ran but rejected → status=sized_rejected, reject fields present."""
-        from oa2.graph.pipeline import _build_decision
+        from tradingbot.graph.pipeline import _build_decision
 
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA)
         ctx.consensus = _make_neutral_consensus()
@@ -567,7 +567,7 @@ class TestDecisionStatusProgression(unittest.TestCase):
 
     def test_sized_approved_reflected_in_decision(self):
         """Sizing approved → status=sized_approved, contracts > 0."""
-        from oa2.graph.pipeline import _build_decision, _run_sizing, _build_exit_rules
+        from tradingbot.graph.pipeline import _build_decision, _run_sizing, _build_exit_rules
 
         ctx = run("SPY", context_dict=_SPY_MARKET_DATA)
         ctx.consensus = _make_bullish_consensus(p_bull=0.72)
@@ -586,7 +586,7 @@ class TestDecisionStatusProgression(unittest.TestCase):
 
     def test_decision_always_has_required_keys(self):
         """decision dict always contains the core keys regardless of which layers ran."""
-        from oa2.graph.pipeline import _build_decision
+        from tradingbot.graph.pipeline import _build_decision
 
         ctx = run("SPY")
         ctx.decision = _build_decision(ctx, "SPY")

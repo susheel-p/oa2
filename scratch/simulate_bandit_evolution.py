@@ -1,7 +1,7 @@
 import numpy as np
-from oa2.performance.bandit import BanditEngine
-from oa2.consensus.engine import ConsensusEngine
-from oa2.debaters.base import DebaterOpinion, Direction
+from tradingbot.performance.bandit import BanditEngine
+from tradingbot.consensus.engine import ConsensusEngine
+from tradingbot.debaters.base import DebaterOpinion, Direction
 
 def simulate_regime_shift():
     print("=" * 70)

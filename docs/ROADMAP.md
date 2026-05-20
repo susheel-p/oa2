@@ -1,4 +1,4 @@
-# oa2 Production Roadmap
+# tradingbot Production Roadmap
 
 ## Production Readiness Assessment
 
@@ -21,7 +21,7 @@ Goal: make sure every signal the system emits is honest and statistically ground
 
 ### A1 — Flow Debater: Honest Abstention [DONE]
 
-**Fix:** `oa2/debaters/flow.py` — added `_has_real_flow_data()` guard requiring
+**Fix:** `tradingbot/debaters/flow.py` — added `_has_real_flow_data()` guard requiring
 `flow_data["data_quality"] == "real"`. Returns `conviction=0.0, direction=NEUTRAL`
 when no real tape data available. No more PCR derived from chain delta.
 
@@ -33,14 +33,14 @@ Usage: `python scripts/bandit_warmstart.py [--months 6] [--dry-run] [--verbose]`
 
 ### A3 — EWMA Correlation Matrix [DONE]
 
-**Fix:** `oa2/consensus/covariance.py` — rolling EWMA (λ=0.94, min 20 obs).
-`oa2/consensus/engine.py` — `_compute_correlation_matrix()` now instance method,
+**Fix:** `tradingbot/consensus/covariance.py` — rolling EWMA (λ=0.94, min 20 obs).
+`tradingbot/consensus/engine.py` — `_compute_correlation_matrix()` now instance method,
 uses live EWMA when tracker is warm, falls back to `_fixed_correlation()`.
-Feature flag: `OA2_FLAG_EWMA_CORR` (default on).
+Feature flag: `TRADINGBOT_FLAG_EWMA_CORR` (default on).
 
 ---
 
-## Phase B — Sizing Engine (oa2/sizing/) [COMPLETE]
+## Phase B — Sizing Engine (tradingbot/sizing/) [COMPLETE]
 
 Gate: required before any paper or live trading begins. No trade executes without sizing.
 
@@ -54,7 +54,7 @@ where:
 
 Output: contract count recommendation, bounded by B2 hard caps.
 
-**File:** `oa2/sizing/kelly.py`
+**File:** `tradingbot/sizing/kelly.py`
 
 ### B2 — Book-Level Greeks Hard Caps
 
@@ -67,7 +67,7 @@ Track running book Greeks across all open positions:
 Any proposed trade that would breach a cap is hard-rejected by the pipeline, regardless
 of consensus direction or conviction.
 
-**File:** `oa2/sizing/limits.py`
+**File:** `tradingbot/sizing/limits.py`
 
 ### B3 — CVaR Scenario Check
 
@@ -81,7 +81,7 @@ Five stress scenarios before trade approval:
 If any scenario produces a P&L breach > configured threshold (default: 5% of account),
 the trade is rejected or size is reduced to fit within the CVaR budget.
 
-**File:** `oa2/sizing/cvar.py`
+**File:** `tradingbot/sizing/cvar.py`
 
 ### B4 — DTE-Aware Sizing
 
@@ -94,11 +94,11 @@ DTE is a first-class variable in sizing:
 
 Short positions approaching DTE < 2: mandatory size reduction and exit evaluation.
 
-**File:** `oa2/sizing/kelly.py` (DTE parameter)
+**File:** `tradingbot/sizing/kelly.py` (DTE parameter)
 
 ---
 
-## Phase C — Exit Engine (oa2/execution/) [COMPLETE]
+## Phase C — Exit Engine (tradingbot/execution/) [COMPLETE]
 
 Gate: required for unattended paper trading. Without exits, every open position
 is a risk that grows over time.
@@ -109,7 +109,7 @@ Module that maintains a registry of open positions and their current mark-to-mar
 Polls at configurable intervals (default: every 5 minutes during market hours).
 For each position: current P&L vs target, DTE, current regime, and current consensus.
 
-**File:** `oa2/execution/monitor.py`
+**File:** `tradingbot/execution/monitor.py`
 
 ### C2 — Exit Rules Engine
 
@@ -122,7 +122,7 @@ Rules evaluated in priority order for each open position:
 5. **Hard EOD**: 3:55 PM ET → force close all intraday positions, HARD_EOD_CUTOFF
 6. **Regime flip**: current regime ≠ entry regime → re-run consensus; if direction flips → close
 
-**File:** `oa2/execution/exit.py`
+**File:** `tradingbot/execution/exit.py`
 
 ### C3 — Roll Logic
 
@@ -132,7 +132,7 @@ evaluate rolling to the next expiration vs closing. Roll if:
 - Rolling does not increase Greek exposure beyond limits
 - Regime forecast supports continued premium collection
 
-**File:** `oa2/execution/roll.py`
+**File:** `tradingbot/execution/roll.py`
 
 ---
 
@@ -152,7 +152,7 @@ Current regime (vol × trend) is a daily signal. Add intraday session tagging:
 Debater weights adjust by session: flow and GEX matter more at OPEN;
 technical matters more in AFTERNOON; income/theta harvesting in MIDDAY.
 
-**File:** `oa2/regime/session.py`
+**File:** `tradingbot/regime/session.py`
 
 ### D2 — Leading Crisis Signal
 
@@ -164,7 +164,7 @@ Leading indicators to add:
 - VVIX > 110: vol-of-vol elevated (options on options expensive = hedging demand)
 - Both conditions simultaneously → early CRISIS signal, shift regime one step earlier
 
-**File:** `oa2/regime/classifier.py` (add _leading_crisis_check method)
+**File:** `tradingbot/regime/classifier.py` (add _leading_crisis_check method)
 
 ### D3 — Cross-Asset Macro Signals
 
@@ -177,7 +177,7 @@ TLT, HYG, DXY as regime context:
 These are NOT separate debaters. They are additional inputs to the regime classifier
 that shift vol_state or flag CAUTION/HALT on the MacroSignal.
 
-**File:** `oa2/regime/classifier.py` (add cross_asset_context parameter)
+**File:** `tradingbot/regime/classifier.py` (add cross_asset_context parameter)
 
 ### D4 — Max Pain / Call-Put Walls from GEX
 
@@ -189,7 +189,7 @@ The existing `compute_gex()` function has all the data. Extend it to compute:
 These populate `Setup.resistance_level` (= call wall) and `Setup.support_level` (= put wall).
 Max pain is stored in context for intraday target setting.
 
-**File:** `oa2/dealer/gex.py` (extend GEXResult)
+**File:** `tradingbot/dealer/gex.py` (extend GEXResult)
 
 ### D5 — Fix Additive Conviction Scoring
 
@@ -204,7 +204,7 @@ Fix: group signals by independent data source:
 Vote = max conviction from each group. Cross-group agreement multiplies conviction.
 Same fix applies to flow debater (PCR, sweep counts, OI changes are partially correlated).
 
-**File:** `oa2/debaters/directional.py`, `oa2/debaters/flow.py`
+**File:** `tradingbot/debaters/directional.py`, `tradingbot/debaters/flow.py`
 
 ---
 
@@ -232,7 +232,7 @@ Once data source chosen:
 - Feed dark pool: flow_data["dark_pool_bullish"], flow_data["dark_pool_bearish"]
 - FlowDebater conviction scale is already correct; only the inputs are wrong
 
-**File:** `oa2/dataflows/flow_adapter.py` (new)
+**File:** `tradingbot/dataflows/flow_adapter.py` (new)
 
 ### E3 — Expiration-Aware Flow
 
@@ -262,7 +262,7 @@ Before warm-starting, validate the posteriors make economic sense:
 
 ### F3 — A/B vs v1
 
-OA2_FLAG_AB_V1 flag exists but is unconnected. Wire it:
+TRADINGBOT_FLAG_AB_V1 flag exists but is unconnected. Wire it:
 - On each scan, record v2 consensus direction and v1 decision
 - Compare: win rate, avg P&L, Sharpe, max drawdown over same period
 - Paper cutover when v2 >= v1 on 90-day window

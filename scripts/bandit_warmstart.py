@@ -18,7 +18,7 @@ What it does:
   5. A debater's call is a "hit" if its direction matches next-day direction
      (NEUTRAL is never counted as a hit — it abstains from the binary bet).
   6. Updates BanditEngine Beta posteriors per (debater, regime) arm.
-  7. Saves posteriors to ~/.oa2/bandit/posteriors.json.
+  7. Saves posteriors to ~/.tradingbot/bandit/posteriors.json.
 
 Limitations:
   - Flow debater will abstain throughout (no real tape data in history).
@@ -139,7 +139,7 @@ def _build_context(
 
 def _classify_regime(context: dict) -> int:
     """Quick regime classification for warm-start."""
-    from oa2.regime.classifier import RegimeClassifier
+    from tradingbot.regime.classifier import RegimeClassifier
     classifier = RegimeClassifier()
     result = classifier.classify(context)
     return result.regime_id
@@ -155,15 +155,15 @@ def main() -> int:
         print("ERROR: yfinance and pandas are required. Run: pip install yfinance pandas")
         return 1
 
-    from oa2.watchlist.builder import WATCHLIST
-    from oa2.debaters.directional import DirectionalDebater
-    from oa2.debaters.income import IncomeDebater
-    from oa2.debaters.volatility import VolatilityDebater
-    from oa2.debaters.flow import FlowDebater
-    from oa2.debaters.sentiment import SentimentDebater
-    from oa2.debaters.base import Direction
-    from oa2.performance.bandit import BanditEngine
-    from oa2.performance.storage import bandit_path
+    from tradingbot.watchlist.builder import WATCHLIST
+    from tradingbot.debaters.directional import DirectionalDebater
+    from tradingbot.debaters.income import IncomeDebater
+    from tradingbot.debaters.volatility import VolatilityDebater
+    from tradingbot.debaters.flow import FlowDebater
+    from tradingbot.debaters.sentiment import SentimentDebater
+    from tradingbot.debaters.base import Direction
+    from tradingbot.performance.bandit import BanditEngine
+    from tradingbot.performance.storage import bandit_path
 
     debaters = {
         "directional": DirectionalDebater(),

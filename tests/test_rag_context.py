@@ -1,16 +1,16 @@
-"""Tests for oa2.learning.rag_context + KB-aware quality_gates."""
+"""Tests for tradingbot.learning.rag_context + KB-aware quality_gates."""
 
 from __future__ import annotations
 
 import pytest
 
-from oa2.learning.knowledge_base import KnowledgeBase, TickerStats
-from oa2.learning.rag_context import (
+from tradingbot.learning.knowledge_base import KnowledgeBase, TickerStats
+from tradingbot.learning.rag_context import (
     get_rag_context,
     reset_rag_cache,
     kb_is_available,
 )
-from oa2.strategy.quality_gates import (
+from tradingbot.strategy.quality_gates import (
     check_quality_gates,
     ticker_conviction_multiplier,
     regime_conviction_multiplier,
@@ -31,7 +31,7 @@ def kb_with_data(tmp_path, monkeypatch):
     # Redirect cache to this KB
     reset_rag_cache()
     monkeypatch.setattr(
-        "oa2.learning.rag_context.default_kb_path",
+        "tradingbot.learning.rag_context.default_kb_path",
         lambda: path,
     )
     reset_rag_cache()
@@ -93,7 +93,7 @@ class TestEmptyKBFallback:
         """When no KB file exists, static TICKER_BLACKLIST still applies."""
         reset_rag_cache()
         monkeypatch.setattr(
-            "oa2.learning.rag_context.default_kb_path",
+            "tradingbot.learning.rag_context.default_kb_path",
             lambda: tmp_path / "nonexistent.json",
         )
         reset_rag_cache()

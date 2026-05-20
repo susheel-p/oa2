@@ -7,10 +7,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from oa2.core.clock import ManualClock, SystemClock
-from oa2.execution.exit import ExitEngine, ExitReason, ExitUrgency
-from oa2.execution.monitor import Leg, OpenPosition, PositionMonitor
-from oa2.sizing.limits import GreeksBook
+from tradingbot.core.clock import ManualClock, SystemClock
+from tradingbot.execution.exit import ExitEngine, ExitReason, ExitUrgency
+from tradingbot.execution.monitor import Leg, OpenPosition, PositionMonitor
+from tradingbot.sizing.limits import GreeksBook
 
 
 ET = ZoneInfo("America/New_York")

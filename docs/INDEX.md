@@ -1,11 +1,11 @@
-# oa2 Documentation Index
+# tradingbot Documentation Index
 
-Complete reference for oa2 trading system architecture, operations, and development.
+Complete reference for tradingbot trading system architecture, operations, and development.
 
 ## Getting Started
 
-**New to oa2?** Start here:
-1. Read [../README.md](../README.md) — What oa2 is and how to run it
+**New to tradingbot?** Start here:
+1. Read [../README.md](../README.md) — What tradingbot is and how to run it
 2. Read [DAEMON.md](DAEMON.md) — How to set up and run the automated daemon
 3. Read [ARCHITECTURE.md](ARCHITECTURE.md) — System design and components
 
@@ -95,12 +95,12 @@ Options structure selection and optimization strategy.
 - `scripts/bandit_warmstart.py` — Bandit prior initialization
 
 ### Core Modules
-- `oa2/graph/pipeline.py` — Main orchestration entry point
-- `oa2/debaters/` — All 6 voting agents
-- `oa2/consensus/` — GLS aggregator + EWMA correlation
-- `oa2/sizing/` — Kelly engine + Greeks caps + CVaR
-- `oa2/execution/` — Exit engine + position monitor + roll logic
-- `oa2/dealer/` — GEX + walls + max pain computation
+- `tradingbot/graph/pipeline.py` — Main orchestration entry point
+- `tradingbot/debaters/` — All 6 voting agents
+- `tradingbot/consensus/` — GLS aggregator + EWMA correlation
+- `tradingbot/sizing/` — Kelly engine + Greeks caps + CVaR
+- `tradingbot/execution/` — Exit engine + position monitor + roll logic
+- `tradingbot/dealer/` — GEX + walls + max pain computation
 
 ## Status Summary
 

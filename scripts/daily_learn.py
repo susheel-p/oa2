@@ -2,12 +2,12 @@
 
 Run nightly after eod_outcomes.py. Reads outcomes_history.jsonl + the latest
 backtest result, builds a fresh KnowledgeBase, writes it to
-~/.oa2/knowledge_base.json (atomic), and emits a human-readable insights
+~/.tradingbot/knowledge_base.json (atomic), and emits a human-readable insights
 report to reports/<date>/insights.md.
 
 Sources merged (in priority order):
-  1. ~/.oa2/outcomes/outcomes_history.jsonl  (live + paper-trade outcomes)
-  2. ~/.oa2/backtest/results_*.json (latest)  (bootstrap when live data is thin)
+  1. ~/.tradingbot/outcomes/outcomes_history.jsonl  (live + paper-trade outcomes)
+  2. ~/.tradingbot/backtest/results_*.json (latest)  (bootstrap when live data is thin)
 
 Usage:
     python scripts/daily_learn.py              # update KB + write today's report
@@ -26,8 +26,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from oa2.core.config import oa2_home
-from oa2.learning.knowledge_base import (
+from tradingbot.core.config import tradingbot_home
+from tradingbot.learning.knowledge_base import (
     DEFAULT_WINDOW_DAYS,
     KnowledgeBase,
     build_from_backtest,
@@ -46,7 +46,7 @@ REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
 # ----- Data loading ---------------------------------------------------------
 
 def _load_outcomes_history() -> list[dict]:
-    p = oa2_home() / "outcomes" / "outcomes_history.jsonl"
+    p = tradingbot_home() / "outcomes" / "outcomes_history.jsonl"
     if not p.exists():
         return []
     records = []
@@ -63,7 +63,7 @@ def _load_outcomes_history() -> list[dict]:
 
 
 def _latest_backtest_path() -> Path | None:
-    bdir = oa2_home() / "backtest"
+    bdir = tradingbot_home() / "backtest"
     results = sorted(bdir.glob("results_*.json"))
     return results[-1] if results else None
 
@@ -84,10 +84,10 @@ def _derive_static_blacklist(kb: KnowledgeBase) -> tuple[list[str], dict[str, fl
     Returns:
         (sorted blacklist tickers, full ticker->multiplier dict)
     """
-    from oa2.learning.knowledge_base import (
+    from tradingbot.learning.knowledge_base import (
         _ticker_blacklisted, _ticker_multiplier, MIN_OBS_FOR_MULT,
     )
-    from oa2.strategy.quality_gates import _FALLBACK_BLACKLIST, _FALLBACK_QUALITY_SCORE
+    from tradingbot.strategy.quality_gates import _FALLBACK_BLACKLIST, _FALLBACK_QUALITY_SCORE
 
     blacklist: set[str] = set()
     scores: dict[str, float] = {}
@@ -116,8 +116,8 @@ def _derive_static_blacklist(kb: KnowledgeBase) -> tuple[list[str], dict[str, fl
 
 
 def _write_static_blacklist(kb: KnowledgeBase, dry_run: bool) -> Path:
-    """Write ~/.oa2/static_blacklist.json from the current KB."""
-    from oa2.strategy.quality_gates import _static_blacklist_path
+    """Write ~/.tradingbot/static_blacklist.json from the current KB."""
+    from tradingbot.strategy.quality_gates import _static_blacklist_path
 
     tickers, scores = _derive_static_blacklist(kb)
     payload = {
@@ -187,7 +187,7 @@ def _report_markdown(kb: KnowledgeBase) -> str:
     lines.append("|--------|----------|-----------|------------|---|------------|-----------|")
     rows = []
     for t, s in kb.tickers.items():
-        from oa2.learning.knowledge_base import _ticker_multiplier, _ticker_blacklisted
+        from tradingbot.learning.knowledge_base import _ticker_multiplier, _ticker_blacklisted
         rows.append((
             t, s.hit_rate, s.avg_pnl_pct, s.dollar_weighted_win_rate,
             s.n_trades, _ticker_multiplier(s), _ticker_blacklisted(s),
@@ -203,7 +203,7 @@ def _report_markdown(kb: KnowledgeBase) -> str:
     lines.append("")
     lines.append("| Regime | Hit Rate | Avg PnL | N | Multiplier |")
     lines.append("|--------|----------|---------|---|------------|")
-    from oa2.learning.knowledge_base import _regime_multiplier
+    from tradingbot.learning.knowledge_base import _regime_multiplier
     reg_rows = sorted(kb.regimes.items(), key=lambda r: -r[1].hit_rate)
     for regime, s in reg_rows:
         lines.append(f"| {regime} | {s.hit_rate:.1%} | ${s.avg_pnl:+,.2f} | {s.n_trades} | {_regime_multiplier(s):.2f}x |")
@@ -212,7 +212,7 @@ def _report_markdown(kb: KnowledgeBase) -> str:
     # Recommendations
     lines.append("## Recommendations (auto-derived)")
     lines.append("")
-    from oa2.learning.knowledge_base import (
+    from tradingbot.learning.knowledge_base import (
         _ticker_blacklisted, BLACKLIST_HIT_RATE, MIN_OBS_FOR_BLACKLIST,
     )
     blocked = [(t, s) for t, s in kb.tickers.items() if _ticker_blacklisted(s)]
@@ -230,7 +230,7 @@ def _report_markdown(kb: KnowledgeBase) -> str:
     if boosted:
         lines.append("**Boosted (multiplier > 1.05):**")
         for t, s in sorted(boosted, key=lambda r: -r[1].hit_rate):
-            from oa2.learning.knowledge_base import _ticker_multiplier
+            from tradingbot.learning.knowledge_base import _ticker_multiplier
             lines.append(f"- {t}: {s.hit_rate:.1%} hit-rate, mult={_ticker_multiplier(s):.2f}x")
         lines.append("")
     if underwatch:
@@ -353,7 +353,7 @@ def main() -> int:
             print(f"  Blacklisted: {', '.join(bl_tickers)}")
         # Reload in-process (helps when daily_learn is imported, harmless otherwise)
         try:
-            from oa2.strategy.quality_gates import reload_blacklist_from_disk
+            from tradingbot.strategy.quality_gates import reload_blacklist_from_disk
             reload_blacklist_from_disk()
         except Exception:
             pass

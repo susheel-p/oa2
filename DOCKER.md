@@ -1,4 +1,4 @@
-# Docker Setup for oa2
+# Docker Setup for tradingbot
 
 Complete containerization guide for the trading daemon. All logs, reports, and RAG state persist to local folders.
 
@@ -16,7 +16,7 @@ docker compose build
 docker compose up -d
 
 # View logs live
-docker compose logs -f oa2-daemon
+docker compose logs -f tradingbot-daemon
 
 # Stop
 docker compose down
@@ -44,13 +44,13 @@ docker compose down
 ├── moomoo OpenD (port 11111) — must run on host
 ├── Docker Desktop
 └── docker-compose
-    └── oa2-daemon container
+    └── tradingbot-daemon container
         ├── market_monitor.py   (main daemon)
         ├── watchdog.py         (sidecar monitor)
         └── Volume mounts
             ├── ./logs/         → /app/logs
             ├── ./reports/      → /app/reports
-            └── oa2-data        → /data/oa2 (named volume)
+            └── tradingbot-data        → /data/tradingbot (named volume)
 ```
 
 ---
@@ -73,7 +73,7 @@ The compose file sets this automatically for Windows/Mac Docker Desktop.
 
 ### Other Docker Variables (set in docker-compose.yml)
 
-- `OA2_HOME=/data/oa2` — persistent ML state (knowledge base, outcomes, calibration)
+- `TRADINGBOT_HOME=/data/tradingbot` — persistent ML state (knowledge base, outcomes, calibration)
 - `REPORTS_DIR=/app/reports` — daily/weekly markdown reports
 - `OA2_SUBMIT_ORDERS=0` — 0 for paper trading, 1 for live orders
 - `OA2_TRADE_ENV=SIMULATE` — paper trading mode
@@ -87,7 +87,7 @@ The compose file sets this automatically for Windows/Mac Docker Desktop.
 |-------|------|---------|-----------|
 | `./logs` | bind mount | daemon.log, paper_trade logs, heartbeats | ✅ Yes (local `./logs/`) |
 | `./reports` | bind mount | daily premarket.md, postmarket.md, weekly_analysis.md | ✅ Yes (local `./reports/`) |
-| `oa2-data` | named volume | knowledge_base.json, outcomes history, calibration priors | ⚠️ Docker managed (use docker cp) |
+| `tradingbot-data` | named volume | knowledge_base.json, outcomes history, calibration priors | ⚠️ Docker managed (use docker cp) |
 
 **Persistent state** (never lost on container restart):
 - All outcomes from live trading
@@ -123,7 +123,7 @@ The daemon runs on Eastern Time (`TZ=America/New_York`):
 ```bash
 # 1. Build succeeds
 docker compose build
-# Expected: Image built with Python 3.12, supervisor, oa2 package
+# Expected: Image built with Python 3.12, supervisor, tradingbot package
 
 # 2. Daemon starts and creates logs
 docker compose up -d
@@ -132,8 +132,8 @@ ls logs/
 # Expected: daemon.log, supervisord.log files exist
 
 # 3. Verify mounts work
-docker compose exec oa2-daemon ls /app/logs
-docker compose exec oa2-daemon ls /data/oa2
+docker compose exec tradingbot-daemon ls /app/logs
+docker compose exec tradingbot-daemon ls /data/tradingbot
 # Expected: Directories listed
 
 # 4. Check reports directory (appears at 8:30 AM ET on market days)
@@ -141,11 +141,11 @@ ls reports/
 # Expected: subdirectories with dates (after daemon runs)
 
 # 5. Inspect named volume
-docker volume inspect oa2-data
+docker volume inspect tradingbot-data
 # Expected: volume listed with local mount path
 
 # 6. Logs show daemon running
-docker compose logs oa2-daemon | head -20
+docker compose logs tradingbot-daemon | head -20
 # Expected: "Market monitor started" message
 ```
 
@@ -169,10 +169,10 @@ docker compose logs oa2-daemon | head -20
 **Solution:**
 ```bash
 # Check volume mount
-docker compose exec oa2-daemon mount | grep logs
+docker compose exec tradingbot-daemon mount | grep logs
 
 # Check container can write
-docker compose exec oa2-daemon touch /app/logs/test.txt
+docker compose exec tradingbot-daemon touch /app/logs/test.txt
 ls logs/test.txt
 ```
 
@@ -183,11 +183,11 @@ ls logs/test.txt
 **Solution:**
 ```bash
 # Check named volume is mounted
-docker compose exec oa2-daemon ls /data/oa2/outcomes/
+docker compose exec tradingbot-daemon ls /data/tradingbot/outcomes/
 
 # Backup volume (before deletion)
-docker run --rm -v oa2-data:/data -v $(pwd)/backup:/backup \
-  busybox tar czf /backup/oa2-data.tar.gz -C /data .
+docker run --rm -v tradingbot-data:/data -v $(pwd)/backup:/backup \
+  busybox tar czf /backup/tradingbot-data.tar.gz -C /data .
 ```
 
 ### Weekly analysis not running
@@ -195,26 +195,26 @@ docker run --rm -v oa2-data:/data -v $(pwd)/backup:/backup \
 **Problem:** analyze_weekly.py doesn't run on Sunday at 5:30 PM.
 
 **Solution:**
-1. Check container timezone is ET: `docker compose exec oa2-daemon date`
-2. Check daemon log for "Weekly analysis trigger": `docker compose logs oa2-daemon | grep -i weekly`
+1. Check container timezone is ET: `docker compose exec tradingbot-daemon date`
+2. Check daemon log for "Weekly analysis trigger": `docker compose logs tradingbot-daemon | grep -i weekly`
 3. Ensure `scripts/analyze_weekly.py` exists and is executable
 
 ---
 
 ## Advanced: Backup and Restore
 
-### Backup oa2-data volume
+### Backup tradingbot-data volume
 
 ```bash
-docker run --rm -v oa2-data:/data -v $(pwd):/backup \
-  busybox tar czf /backup/oa2-data-$(date +%Y%m%d).tar.gz -C /data .
+docker run --rm -v tradingbot-data:/data -v $(pwd):/backup \
+  busybox tar czf /backup/tradingbot-data-$(date +%Y%m%d).tar.gz -C /data .
 ```
 
 ### Restore from backup
 
 ```bash
-docker run --rm -v oa2-data:/data -v $(pwd):/backup \
-  busybox tar xzf /backup/oa2-data-20260520.tar.gz -C /data --strip-components=1
+docker run --rm -v tradingbot-data:/data -v $(pwd):/backup \
+  busybox tar xzf /backup/tradingbot-data-20260520.tar.gz -C /data --strip-components=1
 ```
 
 ### Convert named volume to bind mount
@@ -224,12 +224,12 @@ If you prefer local filesystem instead of Docker-managed volume:
 ```yaml
 # In docker-compose.yml, change:
 volumes:
-  - ./data/oa2:/data/oa2     # Local bind mount instead of named volume
+  - ./data/tradingbot:/data/tradingbot     # Local bind mount instead of named volume
 ```
 
 Then remove the named volume:
 ```bash
-docker volume rm oa2-data
+docker volume rm tradingbot-data
 ```
 
 ---
@@ -258,16 +258,16 @@ docker compose down
 
 # Logs
 docker compose logs -f         # follow all services
-docker compose logs -f oa2-daemon --tail=100
+docker compose logs -f tradingbot-daemon --tail=100
 
 # Debug
-docker compose exec oa2-daemon bash      # shell into container
-docker compose exec oa2-daemon python -c "import oa2; print(oa2.__version__)"
+docker compose exec tradingbot-daemon bash      # shell into container
+docker compose exec tradingbot-daemon python -c "import tradingbot; print(tradingbot.__version__)"
 
 # Volume management
 docker volume ls               # list volumes
-docker volume inspect oa2-data # inspect named volume
-docker volume rm oa2-data      # delete (destructive)
+docker volume inspect tradingbot-data # inspect named volume
+docker volume rm tradingbot-data      # delete (destructive)
 
 # Development reload
 docker compose restart          # restart to apply code changes

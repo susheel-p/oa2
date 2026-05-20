@@ -2,9 +2,9 @@
 
 import pytest
 
-from oa2.consensus.engine import ConsensusEngine
-from oa2.consensus.state import Consensus, Direction
-from oa2.debaters.base import DebaterOpinion
+from tradingbot.consensus.engine import ConsensusEngine
+from tradingbot.consensus.state import Consensus, Direction
+from tradingbot.debaters.base import DebaterOpinion
 
 
 @pytest.fixture

@@ -332,7 +332,7 @@ Position would exceed book-level Greeks limits (delta, theta, vega). Protects ag
 export REPORTS_DIR=/path/to/obsidian/vault/trading
 
 # Override base directory for log lookup (default: parent of scripts/)
-export OA2_HOME=/custom/path
+export TRADINGBOT_HOME=/custom/path
 ```
 
 ### Customize Prices

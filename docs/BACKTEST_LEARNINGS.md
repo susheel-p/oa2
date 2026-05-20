@@ -79,7 +79,7 @@
 - 754 days at p_bull > 0.70 (extreme bullish)
 - **0 days at p_bull 0.40-0.60** — the entire middle ground is empty
 
-**Root Cause:** In [engine.py:340](oa2/consensus/engine.py#L340):
+**Root Cause:** In [engine.py:340](tradingbot/consensus/engine.py#L340):
 ```python
 x = raw_score * n_eff * 2.0
 return 1.0 / (1.0 + math.exp(-x))

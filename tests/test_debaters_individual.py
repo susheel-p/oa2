@@ -9,12 +9,12 @@ Each test verifies:
 
 import pytest
 
-from oa2.debaters.base import Direction, TradeQuality
-from oa2.debaters.directional import DirectionalDebater
-from oa2.debaters.income import IncomeDebater
-from oa2.debaters.volatility import VolatilityDebater
-from oa2.debaters.flow import FlowDebater
-from oa2.debaters.sentiment import SentimentDebater
+from tradingbot.debaters.base import Direction, TradeQuality
+from tradingbot.debaters.directional import DirectionalDebater
+from tradingbot.debaters.income import IncomeDebater
+from tradingbot.debaters.volatility import VolatilityDebater
+from tradingbot.debaters.flow import FlowDebater
+from tradingbot.debaters.sentiment import SentimentDebater
 
 
 # ─────────────────────────────────────────────────────────────────────────────

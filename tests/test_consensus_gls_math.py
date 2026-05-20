@@ -18,9 +18,9 @@ import unittest
 
 import numpy as np
 
-from oa2.consensus.engine import ConsensusEngine, _NOISE_FLOOR, _RIDGE_LAMBDA
-from oa2.consensus.state import Direction
-from oa2.debaters.base import DebaterOpinion
+from tradingbot.consensus.engine import ConsensusEngine, _NOISE_FLOOR, _RIDGE_LAMBDA
+from tradingbot.consensus.state import Direction
+from tradingbot.debaters.base import DebaterOpinion
 
 
 # =============================================================================

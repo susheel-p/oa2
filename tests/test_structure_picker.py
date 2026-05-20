@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from oa2.strategy import pick_structure
-from oa2.strategy.structure_picker import (
+from tradingbot.strategy import pick_structure
+from tradingbot.strategy.structure_picker import (
     StructurePick,
     _required_odds,
     SAFETY_MARGIN,

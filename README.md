@@ -53,12 +53,12 @@ python scripts/smoke_test.py
 
 Run with all flags enabled:
 ```bash
-export OA2_FLAG_DEBATERS=1
-export OA2_FLAG_REGIME=1
-export OA2_FLAG_CONSENSUS=1
-export OA2_FLAG_DEALER=1
-export OA2_FLAG_BANDIT=1
-python -c "from oa2.graph.pipeline import run; ctx = run('SPY'); print(ctx.decision)"
+export TRADINGBOT_FLAG_DEBATERS=1
+export TRADINGBOT_FLAG_REGIME=1
+export TRADINGBOT_FLAG_CONSENSUS=1
+export TRADINGBOT_FLAG_DEALER=1
+export TRADINGBOT_FLAG_BANDIT=1
+python -c "from tradingbot.graph.pipeline import run; ctx = run('SPY'); print(ctx.decision)"
 ```
 
 Warm-start bandit from history (run once before paper trading):

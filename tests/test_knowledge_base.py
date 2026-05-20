@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from oa2.learning.knowledge_base import (
+from tradingbot.learning.knowledge_base import (
     KnowledgeBase,
     TickerStats,
     RegimeStats,

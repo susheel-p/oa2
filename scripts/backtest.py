@@ -12,7 +12,7 @@ Design:
     5. Aggregate: accuracy by regime, confusion matrix, Sharpe, A/B table.
 
 Output:
-    JSON report -> ~/.oa2/backtest/results_<timestamp>.json
+    JSON report -> ~/.tradingbot/backtest/results_<timestamp>.json
     Human-readable summary -> stdout
 
 Usage:
@@ -446,14 +446,14 @@ def run_backtest(
         print("ERROR: yfinance and numpy required. Run: pip install yfinance numpy", file=sys.stderr)
         sys.exit(1)
 
-    from oa2.regime.classifier import RegimeClassifier
-    from oa2.consensus.engine import ConsensusEngine
-    from oa2.debaters.directional import DirectionalDebater
-    from oa2.debaters.flow import FlowDebater
-    from oa2.debaters.income import IncomeDebater
-    from oa2.debaters.volatility import VolatilityDebater
-    from oa2.debaters.sentiment import SentimentDebater
-    from oa2.regime.state import VolState, TrendState
+    from tradingbot.regime.classifier import RegimeClassifier
+    from tradingbot.consensus.engine import ConsensusEngine
+    from tradingbot.debaters.directional import DirectionalDebater
+    from tradingbot.debaters.flow import FlowDebater
+    from tradingbot.debaters.income import IncomeDebater
+    from tradingbot.debaters.volatility import VolatilityDebater
+    from tradingbot.debaters.sentiment import SentimentDebater
+    from tradingbot.regime.state import VolState, TrendState
 
     classifier = RegimeClassifier()
     debaters = [
@@ -516,7 +516,7 @@ def run_backtest(
     tasks.sort(key=lambda x: x[0])
 
     # Initialize online bandit if enabled
-    from oa2.performance.bandit import BanditEngine
+    from tradingbot.performance.bandit import BanditEngine
     bandit = BanditEngine() if bandit_enabled else None
 
     all_results: list[DayResult] = []
@@ -779,10 +779,10 @@ def print_report(metrics: BacktestMetrics) -> None:
 
 
 def save_report(metrics: BacktestMetrics, results: list[DayResult]) -> Path:
-    """Save JSON report to ~/.oa2/backtest/."""
+    """Save JSON report to ~/.tradingbot/backtest/."""
     from dataclasses import asdict
 
-    out_dir = Path.home() / ".oa2" / "backtest"
+    out_dir = Path.home() / ".tradingbot" / "backtest"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

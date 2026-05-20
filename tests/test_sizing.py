@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from oa2.sizing.kelly import (
+from tradingbot.sizing.kelly import (
     KellyResult,
     compute_kelly,
     size_from_consensus,
     dte_scalar,
     _MIN_EDGE,
 )
-from oa2.sizing.limits import GreeksBook, LimitCheckResult
-from oa2.sizing.cvar import CVaRChecker, CVaRResult
+from tradingbot.sizing.limits import GreeksBook, LimitCheckResult
+from tradingbot.sizing.cvar import CVaRChecker, CVaRResult
 
 
 # =============================================================================

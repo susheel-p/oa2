@@ -53,7 +53,7 @@
 
 ---
 
-## Knowledge Base Schema (`~/.oa2/knowledge_base.json`)
+## Knowledge Base Schema (`~/.tradingbot/knowledge_base.json`)
 
 ```json
 {
@@ -150,7 +150,7 @@
 
 ### Phase 1 — Foundation (Tonight, ~2.5 hrs)
 
-#### 1.1 `oa2/learning/outcomes.py` — Outcome resolver
+#### 1.1 `tradingbot/learning/outcomes.py` — Outcome resolver
 **Purpose:** Convert decision logs into outcomes (direction + P&L).
 
 ```python
@@ -187,8 +187,8 @@ python scripts/eod_outcomes.py --backfill        # process all log files
 ```
 
 Outputs:
-- `~/.oa2/outcomes/outcomes_<date>.jsonl` (one line per outcome)
-- `~/.oa2/outcomes/outcomes_history.jsonl` (rolling append for analysis)
+- `~/.tradingbot/outcomes/outcomes_<date>.jsonl` (one line per outcome)
+- `~/.tradingbot/outcomes/outcomes_history.jsonl` (rolling append for analysis)
 
 #### 1.3 One-shot backfill
 Process all existing `logs/paper_trade_*.jsonl` files → populate `outcomes_history.jsonl`.
@@ -199,8 +199,8 @@ Process all existing `logs/paper_trade_*.jsonl` files → populate `outcomes_his
 
 ### Phase 2 — Knowledge Base + Learner (Tomorrow Morning, ~3 hrs)
 
-#### 2.1 `oa2/learning/knowledge_base.py` — KB writer/reader
-**Purpose:** Read/write `~/.oa2/knowledge_base.json` with atomic writes.
+#### 2.1 `tradingbot/learning/knowledge_base.py` — KB writer/reader
+**Purpose:** Read/write `~/.tradingbot/knowledge_base.json` with atomic writes.
 
 ```python
 @dataclass
@@ -253,7 +253,7 @@ Auto-generated daily markdown with:
 
 ### Phase 3 — RAG Context Injection (Tomorrow Afternoon, ~1.5 hrs)
 
-#### 3.1 `oa2/learning/rag_context.py` — Replace static blacklist
+#### 3.1 `tradingbot/learning/rag_context.py` — Replace static blacklist
 **Purpose:** Inject KB-derived multipliers into pipeline at decision time.
 
 ```python
@@ -344,7 +344,7 @@ python scripts/explore_patterns.py --ticker XLE --regime normal_trending
 ## File Layout
 
 ```
-oa2/
+tradingbot/
   learning/
     __init__.py
     outcomes.py           # TradeOutcome dataclass + resolver
@@ -369,7 +369,7 @@ tests/
   test_rag_context.py
   test_patterns.py
 
-~/.oa2/
+~/.tradingbot/
   knowledge_base.json     # Current KB state (single source of truth)
   outcomes/
     outcomes_2026-05-18.jsonl

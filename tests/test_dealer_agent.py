@@ -2,9 +2,9 @@
 
 import pytest
 
-from oa2.dealer.agent import DealerAgent
-from oa2.dealer.gex import GEXResult, compute_gex
-from oa2.debaters.base import Direction
+from tradingbot.dealer.agent import DealerAgent
+from tradingbot.dealer.gex import GEXResult, compute_gex
+from tradingbot.debaters.base import Direction
 
 
 class TestGEXComputation:
