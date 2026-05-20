@@ -1,6 +1,6 @@
 """Fit the p_bull calibrator from the latest backtest results.
 
-Reads ~/.oa2/backtest/results_*.json (latest by mtime), extracts (p_bull, hit)
+Reads ~/.tradingbot/backtest/results_*.json (latest by mtime), extracts (p_bull, hit)
 pairs from non-NEUTRAL days, and fits the Calibrator. Saves to the path
 returned by `default_calibrator_path()`.
 
@@ -19,12 +19,12 @@ from pathlib import Path
 # Allow running as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from oa2.consensus.calibration import Calibrator, default_calibrator_path
-from oa2.core.config import oa2_home
+from tradingbot.consensus.calibration import Calibrator, default_calibrator_path
+from tradingbot.core.config import tradingbot_home
 
 
 def load_latest_backtest() -> Path:
-    btdir = oa2_home() / "backtest"
+    btdir = tradingbot_home() / "backtest"
     files = sorted(btdir.glob("results_*.json"))
     if not files:
         raise FileNotFoundError(f"No backtest results found in {btdir}")

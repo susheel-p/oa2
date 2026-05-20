@@ -2,7 +2,7 @@
 
 Reads decision logs from `logs/paper_trade_<date>.jsonl`, resolves each
 APPROVED trade against T+1 close prices via yfinance, and appends results
-to `~/.oa2/outcomes/outcomes_history.jsonl`.
+to `~/.tradingbot/outcomes/outcomes_history.jsonl`.
 
 Usage:
     python scripts/eod_outcomes.py                    # today's outcomes
@@ -22,15 +22,15 @@ from pathlib import Path
 # Allow running as a script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from oa2.core.config import oa2_home
-from oa2.learning.outcomes import TradeOutcome, resolve_outcomes_from_log
+from tradingbot.core.config import tradingbot_home
+from tradingbot.learning.outcomes import TradeOutcome, resolve_outcomes_from_log
 
 
 LOG_DIR = Path("logs")
 
 
 def _outcomes_dir() -> Path:
-    d = oa2_home() / "outcomes"
+    d = tradingbot_home() / "outcomes"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

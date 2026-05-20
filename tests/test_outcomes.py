@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from oa2.learning.outcomes import (
+from tradingbot.learning.outcomes import (
     TradeOutcome,
     resolve_outcomes_from_log,
     simulate_spread_pnl,

@@ -1,4 +1,4 @@
-# oa2 Architecture
+# tradingbot Architecture
 
 ## 9-Layer Adaptive Ensemble
 
@@ -75,7 +75,7 @@ GLS aggregation with EWMA live covariance (λ=0.94, min 20 observations):
 - p_bull = sigmoid(score × N_eff × 2.0) — calibrated probability for Kelly sizing
 
 When EWMA tracker is cold (< 20 observations), falls back to `_fixed_correlation()`.
-Feature flag: `OA2_FLAG_EWMA_CORR` (default on).
+Feature flag: `TRADINGBOT_FLAG_EWMA_CORR` (default on).
 
 ## Sizing engine (Phase B)
 

@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from oa2.execution.monitor import OpenPosition, PositionMonitor
-from oa2.execution.exit import ExitEngine, ExitReason, ExitUrgency
-from oa2.execution.roll import RollEngine
+from tradingbot.execution.monitor import OpenPosition, PositionMonitor
+from tradingbot.execution.exit import ExitEngine, ExitReason, ExitUrgency
+from tradingbot.execution.roll import RollEngine
 
 
 # =============================================================================

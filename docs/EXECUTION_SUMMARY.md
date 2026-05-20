@@ -71,7 +71,7 @@ Result: 0/22 approved trades
 
 ### PHASE 1: Tonight — Directional Improvements (P1.1 + P1.2)
 
-**P1.1 — Add RSI/MACD/ATR Momentum (File: oa2/debaters/directional.py)**
+**P1.1 — Add RSI/MACD/ATR Momentum (File: tradingbot/debaters/directional.py)**
 
 Add new signal group (Group E) for momentum oscillators:
 ```python
@@ -102,7 +102,7 @@ Update conviction formula to include Group E:
 
 **Validation:** Backtest, measure directional accuracy (target ≥55%)
 
-**P1.2 — Session Weighting + Regime Volatility (File: oa2/debaters/directional.py)**
+**P1.2 — Session Weighting + Regime Volatility (File: tradingbot/debaters/directional.py)**
 
 Wire session overlay into conviction scaling:
 ```python
@@ -139,7 +139,7 @@ conviction = max(0.2, min(0.75, conviction))  # Keep within bounds
 
 ### PHASE 2: Tomorrow Morning — Sentiment Rewrite (P2.1)
 
-**P2.1 — IV-Skew Sentiment Debater (File: oa2/debaters/sentiment.py)**
+**P2.1 — IV-Skew Sentiment Debater (File: tradingbot/debaters/sentiment.py)**
 
 Complete rewrite (replace current implementation):
 ```python

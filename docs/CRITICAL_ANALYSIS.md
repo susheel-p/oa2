@@ -10,7 +10,7 @@
 
 ### Answer: **Flow debater dominates; others contribute little**
 
-The **GLS consensus engine** (oa2/consensus/engine.py) computes weights dynamically based on:
+The **GLS consensus engine** (tradingbot/consensus/engine.py) computes weights dynamically based on:
 - **Conviction level** (σ_i = 1 - |opinion_i|) — higher conviction → lower noise → higher precision weight
 - **Correlation structure** (hardcoded priors until EWMA tracker warms up)
 
@@ -56,7 +56,7 @@ volatility    NEUTRAL   0.350       → LOW (neutral, noise = 0.65)
 
 ### Answer: **Brier = 0.24881 (post-calibration) on 218 (p_bull, hit) pairs**
 
-**Calibrator state (from ~/.oa2/calibration/p_bull_calibrator.json):**
+**Calibrator state (from ~/.tradingbot/calibration/p_bull_calibrator.json):**
 ```json
 {
   "mode": "platt",
@@ -142,7 +142,7 @@ The GLS engine recalculates weights with new precision σ_d = 1 - 0.60 = 0.40 (h
 - Consensus raw_score changes: +0.02 to +0.03
 - **Projected p_bull: 0.7952 → 0.8100-0.8200** (small but measurable shift)
 
-**Kelly sensitivity (from oa2/sizing/kelly.py):**
+**Kelly sensitivity (from tradingbot/sizing/kelly.py):**
 
 Assume a typical SPY spread: max_profit=$200, max_loss=$100, DTE=10 days
 
@@ -305,13 +305,13 @@ The IMPROVEMENT_PLAN.md is **directionally correct** but needs one critical refr
 ### Phase 1 — Directional Signals (Today/Tonight)
 
 **P1.1: Add RSI/MACD/ATR with volume confirmation**
-- File: `oa2/debaters/directional.py`
+- File: `tradingbot/debaters/directional.py`
 - Add _group_e_vote() for momentum signals
 - Validation: Backtest on 6-month window, measure directional accuracy delta
 - Gate: Directional accuracy must improve to ≥55%
 
 **P1.2: Session weighting with regime scaling**
-- File: `oa2/debaters/directional.py` (leverage existing session data)
+- File: `tradingbot/debaters/directional.py` (leverage existing session data)
 - Scale conviction by regime volatility: `conviction × (1 + vol_factor)`
 - Validation: Backtest, check conviction distribution by session
 - Gate: No accuracy loss in midday (should reduce false signals)
@@ -319,7 +319,7 @@ The IMPROVEMENT_PLAN.md is **directionally correct** but needs one critical refr
 ### Phase 2 — Sentiment Simplification (Tomorrow)
 
 **P2.1: Replace sentiment with IV-skew primary**
-- File: `oa2/debaters/sentiment.py` (complete rewrite, ~40 lines)
+- File: `tradingbot/debaters/sentiment.py` (complete rewrite, ~40 lines)
 - Fetch IV skew, earnings calendar, call/put ratio
 - Conviction: [0.25, 0.60] range (honest about signal quality)
 - Validation: Backtest, measure sentiment accuracy and conviction distribution

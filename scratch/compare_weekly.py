@@ -40,8 +40,8 @@ def load_weekly_metrics(filepath):
     return results
 
 def main():
-    base_file = r"C:\Users\pamed\.oa2\backtest\results_20260519_164213.json"
-    adapt_file = r"C:\Users\pamed\.oa2\backtest\results_20260519_164245.json"
+    base_file = r"C:\Users\pamed\.tradingbot\backtest\results_20260519_164213.json"
+    adapt_file = r"C:\Users\pamed\.tradingbot\backtest\results_20260519_164245.json"
     
     base = load_weekly_metrics(base_file)
     adapt = load_weekly_metrics(adapt_file)

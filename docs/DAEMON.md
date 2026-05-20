@@ -1,4 +1,4 @@
-# oa2 Market Monitor Daemon — Fully Automated Trading
+# tradingbot Market Monitor Daemon — Fully Automated Trading
 
 ## What is the Daemon?
 
@@ -66,8 +66,8 @@ python scripts/market_monitor.py
    - Click "Create Basic Task..." on the right
 
 2. **General Tab**
-   - Name: `oa2-market-monitor`
-   - Description: `Automated trading system for oa2`
+   - Name: `tradingbot-market-monitor`
+   - Description: `Automated trading system for tradingbot`
    - Check: "Run whether user is logged in or not"
 
 3. **Trigger Tab**
@@ -77,8 +77,8 @@ python scripts/market_monitor.py
 4. **Action Tab**
    - Click "New..." → Select "Start a program"
    - Program: `python`
-   - Arguments: `C:\path\to\oa2-new\scripts\market_monitor.py`
-   - Start in: `C:\path\to\oa2-new`
+   - Arguments: `C:\path\to\tradingbot-new\scripts\market_monitor.py`
+   - Start in: `C:\path\to\tradingbot-new`
    - Click OK
 
 5. **Finish**
@@ -113,7 +113,7 @@ taskkill /pid <PID> /f
 
 2. **Add this line** (all one line):
    ```bash
-   @reboot cd /path/to/oa2-new && nohup python scripts/market_monitor.py > logs/daemon.log 2>&1 &
+   @reboot cd /path/to/tradingbot-new && nohup python scripts/market_monitor.py > logs/daemon.log 2>&1 &
    ```
 
 3. **Save and exit**
@@ -276,16 +276,16 @@ The daemon writes a fresh timestamp every time it completes a scheduling loop. T
 
    **Windows:**
    - Follow the same steps as daemon setup
-   - Name the task: `oa2-watchdog`
+   - Name the task: `tradingbot-watchdog`
    - Program: `python`
-   - Arguments: `C:\path\to\oa2-new\scripts\watchdog.py`
+   - Arguments: `C:\path\to\tradingbot-new\scripts\watchdog.py`
    - Trigger: "Repeat task every 5 minutes, indefinitely" (under Advanced settings)
 
    **Linux/Mac:**
    ```bash
    crontab -e
    # Add this line:
-   */5 * * * * cd /path/to/oa2-new && python scripts/watchdog.py
+   */5 * * * * cd /path/to/tradingbot-new && python scripts/watchdog.py
    ```
 
 3. **Optional: Configure watchdog sensitivity** (in `.env`)
@@ -315,7 +315,7 @@ python scripts/watchdog.py --loop
 ```
 [OK] Alert 1/5 sent: daemon stale (age 330s)
 ```
-Telegram message arrives: "oa2 daemon stale (no update for 330s). Check: tail -f logs/daemon.log"
+Telegram message arrives: "tradingbot daemon stale (no update for 330s). Check: tail -f logs/daemon.log"
 
 **When max alerts reached:**
 ```
@@ -339,7 +339,7 @@ You can delete this file anytime to reset the alert counter.
 ### Daemon not starting at boot
 
 **Windows:**
-- Verify task exists: Open Task Scheduler → Search for "oa2-market-monitor"
+- Verify task exists: Open Task Scheduler → Search for "tradingbot-market-monitor"
 - Check trigger: Right-click task → Properties → Trigger tab
 - Verify action: Right-click task → Properties → Action tab
 - Run test: Right-click task → Run
@@ -540,7 +540,7 @@ A: The daemon automatically falls back to yfinance. Trades will still execute, j
 
 ```bash
 # Backup logs and reports
-tar -czf backups/oa2_trading_$(date +%Y%m%d).tar.gz logs/ reports/
+tar -czf backups/tradingbot_trading_$(date +%Y%m%d).tar.gz logs/ reports/
 ```
 
 ---

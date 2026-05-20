@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from oa2.consensus.calibration import Calibrator, _sigmoid
-from oa2.sizing.mc_cvar import MonteCarloCVaR, LegSpec, _bsm_price
+from tradingbot.consensus.calibration import Calibrator, _sigmoid
+from tradingbot.sizing.mc_cvar import MonteCarloCVaR, LegSpec, _bsm_price
 
 
 # ---------------------------------------------------------------------------

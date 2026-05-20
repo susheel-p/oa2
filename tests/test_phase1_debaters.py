@@ -2,14 +2,14 @@
 
 import pytest
 
-from oa2.debaters.directional import DirectionalDebater
-from oa2.debaters.income import IncomeDebater
-from oa2.debaters.volatility import VolatilityDebater
-from oa2.debaters.flow import FlowDebater
-from oa2.debaters.sentiment import SentimentDebater
-from oa2.debaters.runner import DebaterEnsemble
-from oa2.graph.pipeline import run
-from oa2.core import feature_flags
+from tradingbot.debaters.directional import DirectionalDebater
+from tradingbot.debaters.income import IncomeDebater
+from tradingbot.debaters.volatility import VolatilityDebater
+from tradingbot.debaters.flow import FlowDebater
+from tradingbot.debaters.sentiment import SentimentDebater
+from tradingbot.debaters.runner import DebaterEnsemble
+from tradingbot.graph.pipeline import run
+from tradingbot.core import feature_flags
 
 
 def test_debaters_import():
@@ -143,11 +143,11 @@ def test_pipeline_with_debaters_enabled():
     """Pipeline runs debaters when flag is enabled (shadow mode)."""
     # Temporarily enable debaters flag
     import os
-    os.environ["OA2_FLAG_DEBATERS"] = "1"
+    os.environ["TRADINGBOT_FLAG_DEBATERS"] = "1"
 
     # Re-import to pick up new flag
     import importlib
-    import oa2.core.feature_flags
+    import tradingbot.core.feature_flags
     importlib.reload(oa2.core.feature_flags)
 
     context = {
@@ -172,7 +172,7 @@ def test_pipeline_with_debaters_enabled():
     assert len(result.debater_opinions) == 5
 
     # Clean up
-    del os.environ["OA2_FLAG_DEBATERS"]
+    del os.environ["TRADINGBOT_FLAG_DEBATERS"]
     importlib.reload(oa2.core.feature_flags)
 
 

@@ -10,7 +10,7 @@ Usage:
 Reports are written to reports/ directory with Obsidian [[wikilinks]].
 
 Environment:
-    OA2_HOME — override base directory (default: parent of scripts/)
+    TRADINGBOT_HOME — override base directory (default: parent of scripts/)
     REPORTS_DIR — override reports output directory (default: reports/)
 """
 
@@ -51,7 +51,7 @@ def _log_error(msg: str) -> None:
 
 def _get_base_dir() -> Path:
     import os
-    env_home = os.getenv("OA2_HOME")
+    env_home = os.getenv("TRADINGBOT_HOME")
     if env_home:
         return Path(env_home)
     return Path(__file__).parent.parent
@@ -132,7 +132,7 @@ def _get_yesterday_str(date_str: str | None = None) -> str:
 def _fetch_price(ticker: str) -> float | None:
     """Fetch current price via moomoo (preferred) or yfinance (fallback)."""
     try:
-        from oa2.dataflows.moomoo_data import fetch_quote
+        from tradingbot.dataflows.moomoo_data import fetch_quote
         quote = fetch_quote(ticker)
         if quote and quote.get("last_price"):
             return float(quote["last_price"])
@@ -456,7 +456,7 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
     lines.append("## Live Broker Positions")
     lines.append("")
     try:
-        from oa2.dataflows.moomoo_data import fetch_account_positions
+        from tradingbot.dataflows.moomoo_data import fetch_account_positions
         live_positions = fetch_account_positions()
     except Exception:
         live_positions = []
@@ -914,7 +914,7 @@ if __name__ == "__main__":
         main()
     finally:
         try:
-            from oa2.dataflows.moomoo_data import close_quote_context
+            from tradingbot.dataflows.moomoo_data import close_quote_context
             close_quote_context()
         except Exception:
             pass

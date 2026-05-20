@@ -8,18 +8,18 @@ import datetime
 import pytest
 from zoneinfo import ZoneInfo
 
-from oa2.regime.session import (
+from tradingbot.regime.session import (
     SessionState,
     get_session_state,
     session_weight_multipliers,
     apply_session_weights,
     session_context,
 )
-from oa2.regime.classifier import RegimeClassifier
-from oa2.regime.state import VolState
-from oa2.dealer.gex import compute_gex, _compute_call_wall, _compute_put_wall, _compute_max_pain
-from oa2.debaters.directional import DirectionalDebater
-from oa2.debaters.base import Direction
+from tradingbot.regime.classifier import RegimeClassifier
+from tradingbot.regime.state import VolState
+from tradingbot.dealer.gex import compute_gex, _compute_call_wall, _compute_put_wall, _compute_max_pain
+from tradingbot.debaters.directional import DirectionalDebater
+from tradingbot.debaters.base import Direction
 
 ET = ZoneInfo("America/New_York")
 

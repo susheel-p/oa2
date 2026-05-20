@@ -2,8 +2,8 @@
 
 import pytest
 
-from oa2.regime.classifier import RegimeClassifier
-from oa2.regime.state import RegimeClassification, TrendState, VolState
+from tradingbot.regime.classifier import RegimeClassifier
+from tradingbot.regime.state import RegimeClassification, TrendState, VolState
 
 
 class TestRegimeClassifier:

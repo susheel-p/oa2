@@ -45,11 +45,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts import telegram_notify
 
 
-OA2_HOME = Path(os.getenv("OA2_HOME", Path(__file__).parent.parent))
-HEARTBEAT_FILE = OA2_HOME / "logs" / "daemon_heartbeat.txt"
-WATCHDOG_HEARTBEAT_FILE = OA2_HOME / "logs" / "watchdog_heartbeat.txt"
-STATE_FILE = OA2_HOME / "logs" / "watchdog_state.json"
-LOG_FILE = OA2_HOME / "logs" / "watchdog.log"
+TRADINGBOT_HOME = Path(os.getenv("TRADINGBOT_HOME", Path(__file__).parent.parent))
+HEARTBEAT_FILE = TRADINGBOT_HOME / "logs" / "daemon_heartbeat.txt"
+WATCHDOG_HEARTBEAT_FILE = TRADINGBOT_HOME / "logs" / "watchdog_heartbeat.txt"
+STATE_FILE = TRADINGBOT_HOME / "logs" / "watchdog_state.json"
+LOG_FILE = TRADINGBOT_HOME / "logs" / "watchdog.log"
 
 STALE_SECONDS = int(os.getenv("WATCHDOG_STALE_SECONDS", "300"))
 MAX_ALERTS = int(os.getenv("WATCHDOG_MAX_ALERTS", "5"))

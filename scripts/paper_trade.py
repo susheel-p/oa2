@@ -14,13 +14,13 @@ Usage:
     python scripts/paper_trade.py --tickers SPY QQQ         # scan subset only
 
 Environment variables (all default ON for paper trading):
-    OA2_FLAG_DEBATERS=1
-    OA2_FLAG_REGIME=1
-    OA2_FLAG_CONSENSUS=1
-    OA2_FLAG_DEALER=1
-    OA2_FLAG_BANDIT=1
-    OA2_FLAG_SIZING=1
-    OA2_FLAG_EXIT=1
+    TRADINGBOT_FLAG_DEBATERS=1
+    TRADINGBOT_FLAG_REGIME=1
+    TRADINGBOT_FLAG_CONSENSUS=1
+    TRADINGBOT_FLAG_DEALER=1
+    TRADINGBOT_FLAG_BANDIT=1
+    TRADINGBOT_FLAG_SIZING=1
+    TRADINGBOT_FLAG_EXIT=1
     OA2_ACCOUNT_SIZE=50000      (override account size, default $50,000)
 """
 
@@ -46,21 +46,21 @@ except Exception:
 
 # ── Force all feature flags ON before any oa2 import ──────────────────────────
 for _flag in (
-    "OA2_FLAG_DEBATERS",
-    "OA2_FLAG_REGIME",
-    "OA2_FLAG_CONSENSUS",
-    "OA2_FLAG_DEALER",
-    "OA2_FLAG_BANDIT",
-    "OA2_FLAG_SIZING",
-    "OA2_FLAG_EXIT",
+    "TRADINGBOT_FLAG_DEBATERS",
+    "TRADINGBOT_FLAG_REGIME",
+    "TRADINGBOT_FLAG_CONSENSUS",
+    "TRADINGBOT_FLAG_DEALER",
+    "TRADINGBOT_FLAG_BANDIT",
+    "TRADINGBOT_FLAG_SIZING",
+    "TRADINGBOT_FLAG_EXIT",
 ):
     os.environ.setdefault(_flag, "1")
 
 # ── oa2 imports ───────────────────────────────────────────────────────────────
-from oa2.execution.monitor import PositionMonitor, OpenPosition, Leg
-from oa2.graph.pipeline import run as pipeline_run
-from oa2.sizing.limits import GreeksBook
-from oa2.watchlist.builder import WATCHLIST
+from tradingbot.execution.monitor import PositionMonitor, OpenPosition, Leg
+from tradingbot.graph.pipeline import run as pipeline_run
+from tradingbot.sizing.limits import GreeksBook
+from tradingbot.watchlist.builder import WATCHLIST
 
 ET = ZoneInfo("America/New_York")
 LOG_DIR = Path("logs")
@@ -120,7 +120,7 @@ _BROKER = None  # lazy singleton
 def _broker():
     global _BROKER
     if _BROKER is None:
-        from oa2.execution.moomoo_broker import MoomooBroker
+        from tradingbot.execution.moomoo_broker import MoomooBroker
         _BROKER = MoomooBroker()
     return _BROKER
 
@@ -132,7 +132,7 @@ def _submit_to_broker(ticker: str, decision: dict, structure_pick: dict) -> list
     """
     import datetime as _dt
     import uuid
-    from oa2.execution.broker import LegSpec
+    from tradingbot.execution.broker import LegSpec
 
     contracts = int(decision.get("contracts") or 0)
     if contracts <= 0:
@@ -200,7 +200,7 @@ def _submit_to_broker(ticker: str, decision: dict, structure_pick: dict) -> list
 
 def _close_position_on_broker(pos: OpenPosition) -> list[dict]:
     """Submit opposite orders to the broker to close the position. Never raises."""
-    from oa2.execution.broker import LegSpec
+    from tradingbot.execution.broker import LegSpec
     
     fills: list[dict] = []
     try:
@@ -290,8 +290,8 @@ def _run_exit_only(account_size: float, dry_run: bool) -> None:
     """Load today's positions, fetch fresh quotes, run exit engine, log alerts."""
     import yfinance as yf
 
-    from oa2.execution.exit import ExitEngine
-    from oa2.execution.monitor import PositionMonitor
+    from tradingbot.execution.exit import ExitEngine
+    from tradingbot.execution.monitor import PositionMonitor
 
     today = _today_str()
     positions_path = LOG_DIR / f"positions_{today}.json"

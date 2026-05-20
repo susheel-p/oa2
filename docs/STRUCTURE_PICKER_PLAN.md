@@ -7,7 +7,7 @@
 
 ## The Bug (Single Line)
 
-[pipeline.py:388-389](oa2/graph/pipeline.py#L388-L389) — `max_profit` and `max_loss` default to **$200 / $300 (R:R = 0.667)** because no module computes them from real chain data.
+[pipeline.py:388-389](tradingbot/graph/pipeline.py#L388-L389) — `max_profit` and `max_loss` default to **$200 / $300 (R:R = 0.667)** because no module computes them from real chain data.
 
 ```python
 max_profit = float(md.get("max_profit", 200.0))
@@ -60,7 +60,7 @@ Output:
 
 ---
 
-## Proposed Module: `oa2/strategy/structure_picker.py`
+## Proposed Module: `tradingbot/strategy/structure_picker.py`
 
 ### Design Principles
 
@@ -145,12 +145,12 @@ def pick_structure(
 ## Integration Plan
 
 ### Phase 1: Build picker module (2-3 hrs)
-- `oa2/strategy/__init__.py`
-- `oa2/strategy/structure_picker.py` with `pick_structure()`
+- `tradingbot/strategy/__init__.py`
+- `tradingbot/strategy/structure_picker.py` with `pick_structure()`
 - Unit tests using cached chain data (AMD, SPY, QQQ)
 
 ### Phase 2: Wire into pipeline L3 (30 min)
-- Insert L3 step in [pipeline.py](oa2/graph/pipeline.py) before sizing
+- Insert L3 step in [pipeline.py](tradingbot/graph/pipeline.py) before sizing
 - Populate `ctx.market_data["max_profit"]`, `max_loss`, `delta_per_contract`, etc.
 - Populate `ctx.strategy.selected_structure` for debaters
 

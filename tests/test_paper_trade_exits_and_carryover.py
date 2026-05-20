@@ -34,8 +34,8 @@ for k, v in orig_env.items():
     except Exception:
         pass
 
-from oa2.execution.monitor import Leg, OpenPosition, PositionMonitor
-from oa2.sizing.limits import GreeksBook
+from tradingbot.execution.monitor import Leg, OpenPosition, PositionMonitor
+from tradingbot.sizing.limits import GreeksBook
 
 
 def _pos(trade_id: str = "t1", ticker: str = "SPY", **overrides) -> OpenPosition:

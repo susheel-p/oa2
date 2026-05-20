@@ -70,7 +70,7 @@ Current sentiment sources (news + reddit) are weak and noisy. Options:
 **Current issue:** Conviction only 0.39-0.48, not decisive enough.
 
 ### P1.1 — Add real-time technical momentum signals
-**File:** `oa2/debaters/directional.py`
+**File:** `tradingbot/debaters/directional.py`
 
 Replace current EMA-crossover logic with:
 - **RSI oversold/overbought** (RSI < 30 = bullish, > 70 = bearish) with conviction scaling
@@ -83,7 +83,7 @@ Replace current EMA-crossover logic with:
 ---
 
 ### P1.2 — Add intraday session context
-**File:** `oa2/regime/classifier.py` (session overlay already exists)
+**File:** `tradingbot/regime/classifier.py` (session overlay already exists)
 
 Wire session state into directional debater:
 - **Market open (9:30-10:00 ET):** Usually volatile, higher conviction bias
@@ -96,7 +96,7 @@ Wire session state into directional debater:
 ---
 
 ### P1.3 — Add relative strength vs macro
-**File:** `oa2/debaters/directional.py` (new)
+**File:** `tradingbot/debaters/directional.py` (new)
 
 Fetch SPY/QQQ trend and scale single-name conviction:
 - If SPY is up 2%+ today and ticker is up 1%: increase conviction
@@ -113,7 +113,7 @@ Fetch SPY/QQQ trend and scale single-name conviction:
 **Root cause:** News + reddit sources are weak and noisy. Sentiment needs a harder signal source.
 
 ### P2.1 — Replace sentiment sources with IV-skew + earnings calendar
-**File:** `oa2/debaters/sentiment.py`
+**File:** `tradingbot/debaters/sentiment.py`
 
 Rewrite sentiment debater to focus on options market structure (harder to game):
 
@@ -245,7 +245,7 @@ Instead of just "IV is expensive/cheap", score how good the specific trade struc
 ### Phase 1 — Directional Signal Improvement (Tonight)
 
 **P1.1: Add RSI/MACD/ATR momentum with volume confirmation**
-- File: `oa2/debaters/directional.py` (add _group_e_vote function)
+- File: `tradingbot/debaters/directional.py` (add _group_e_vote function)
 - Signals:
   - RSI oversold/overbought (RSI < 30 = +1, > 70 = -1, else 0)
   - MACD trend (histogram positive/negative)
@@ -256,7 +256,7 @@ Instead of just "IV is expensive/cheap", score how good the specific trade struc
 - **Gate:** Directional accuracy must improve to ≥55% or revert
 
 **P1.2: Session weighting with regime volatility scaling**
-- File: `oa2/debaters/directional.py` (wire session overlay into conviction)
+- File: `tradingbot/debaters/directional.py` (wire session overlay into conviction)
 - Session bias: 9:30-10:00 ET = 1.2× (volatile, trending), 12:00-14:00 ET = 0.7× (consolidation)
 - Volatility scaling: In high-VIX regimes (>30), reduce session bias (markets choppier)
 - Backtest after: Check conviction distribution by session, ensure no accuracy regression in midday
@@ -265,7 +265,7 @@ Instead of just "IV is expensive/cheap", score how good the specific trade struc
 ### Phase 2 — Sentiment Simplification (Tomorrow)
 
 **P2.1: Replace sentiment with IV-skew + earnings calendar (code above)**
-- File: `oa2/debaters/sentiment.py` (complete rewrite, ~50 lines)
+- File: `tradingbot/debaters/sentiment.py` (complete rewrite, ~50 lines)
 - Data sources: yfinance (IV skew), free earnings calendar, moomoo (call/put ratio)
 - Backtest after: Measure sentiment accuracy delta, expect ≥52%
 - **Gate:** Sentiment accuracy must improve to ≥52%

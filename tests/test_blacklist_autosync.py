@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from oa2.learning.knowledge_base import KnowledgeBase, TickerStats
-from oa2.strategy import quality_gates as qg
+from tradingbot.learning.knowledge_base import KnowledgeBase, TickerStats
+from tradingbot.strategy import quality_gates as qg
 
 
 @pytest.fixture

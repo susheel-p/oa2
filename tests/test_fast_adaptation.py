@@ -1,8 +1,8 @@
 import numpy as np
-from oa2.performance.bandit import BanditEngine, BetaPosterior
-from oa2.consensus.engine import ConsensusEngine
-from oa2.consensus.state import Direction as ConsensusDirection
-from oa2.debaters.base import DebaterOpinion
+from tradingbot.performance.bandit import BanditEngine, BetaPosterior
+from tradingbot.consensus.engine import ConsensusEngine
+from tradingbot.consensus.state import Direction as ConsensusDirection
+from tradingbot.debaters.base import DebaterOpinion
 
 def test_bandit_decay():
     engine = BanditEngine()

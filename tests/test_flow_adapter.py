@@ -6,7 +6,7 @@ import datetime
 
 import pytest
 
-from oa2.dataflows.flow_adapter import (
+from tradingbot.dataflows.flow_adapter import (
     FlowData,
     FlowAdapterBase,
     YFinanceFlowAdapter,
@@ -19,7 +19,7 @@ from oa2.dataflows.flow_adapter import (
     list_adapters,
     _ADAPTER_REGISTRY,
 )
-from oa2.dataflows.expiry_flow import (
+from tradingbot.dataflows.expiry_flow import (
     ExpiryBucket,
     ExpiryFlowProfile,
     classify_expiry_flow,
@@ -167,7 +167,7 @@ class TestRegistry:
         assert info["moomoo"]["priority"] > info["yfinance"]["priority"]
 
     def test_register_adapter_decorator(self):
-        from oa2.dataflows.flow_adapter import register_adapter
+        from tradingbot.dataflows.flow_adapter import register_adapter
 
         @register_adapter("_test_vendor_", env_key="NONEXISTENT_KEY_XYZ", priority=99)
         class _TestAdapter(FlowAdapterBase):

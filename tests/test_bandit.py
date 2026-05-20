@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from oa2.performance.bandit import BanditEngine, BetaPosterior
-from oa2.performance.storage import load_posteriors, save_posteriors
+from tradingbot.performance.bandit import BanditEngine, BetaPosterior
+from tradingbot.performance.storage import load_posteriors, save_posteriors
 
 
 class TestBetaPosterior:
@@ -217,8 +217,8 @@ class TestBanditEngineWithConsensus:
 
     def test_bandit_weights_blended_with_gls(self):
         """Bandit weights multiply GLS weights correctly."""
-        from oa2.consensus.engine import ConsensusEngine
-        from oa2.debaters.base import DebaterOpinion
+        from tradingbot.consensus.engine import ConsensusEngine
+        from tradingbot.debaters.base import DebaterOpinion
 
         # Create sample opinions
         opinions = [
@@ -247,8 +247,8 @@ class TestBanditEngineWithConsensus:
 
     def test_uniform_prior_same_as_no_prior(self):
         """Uniform bandit weights don't change GLS outcome."""
-        from oa2.consensus.engine import ConsensusEngine
-        from oa2.debaters.base import DebaterOpinion
+        from tradingbot.consensus.engine import ConsensusEngine
+        from tradingbot.debaters.base import DebaterOpinion
 
         opinions = [
             DebaterOpinion("directional", "BULLISH", 0.75, "test", {}),

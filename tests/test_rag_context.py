@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from oa2.learning.knowledge_base import KnowledgeBase, TickerStats
-from oa2.learning.rag_context import (
+from tradingbot.learning.knowledge_base import KnowledgeBase, TickerStats
+from tradingbot.learning.rag_context import (
     get_rag_context,
     reset_rag_cache,
     kb_is_available,
 )
-from oa2.strategy.quality_gates import (
+from tradingbot.strategy.quality_gates import (
     check_quality_gates,
     ticker_conviction_multiplier,
     regime_conviction_multiplier,
