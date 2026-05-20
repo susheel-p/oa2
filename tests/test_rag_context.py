@@ -1,4 +1,4 @@
-"""Tests for oa2.learning.rag_context + KB-aware quality_gates."""
+"""Tests for tradingbot.learning.rag_context + KB-aware quality_gates."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def kb_with_data(tmp_path, monkeypatch):
     # Redirect cache to this KB
     reset_rag_cache()
     monkeypatch.setattr(
-        "oa2.learning.rag_context.default_kb_path",
+        "tradingbot.learning.rag_context.default_kb_path",
         lambda: path,
     )
     reset_rag_cache()
@@ -93,7 +93,7 @@ class TestEmptyKBFallback:
         """When no KB file exists, static TICKER_BLACKLIST still applies."""
         reset_rag_cache()
         monkeypatch.setattr(
-            "oa2.learning.rag_context.default_kb_path",
+            "tradingbot.learning.rag_context.default_kb_path",
             lambda: tmp_path / "nonexistent.json",
         )
         reset_rag_cache()

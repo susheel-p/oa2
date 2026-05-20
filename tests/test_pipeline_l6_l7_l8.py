@@ -96,13 +96,13 @@ class TestL6SizingApproved(unittest.TestCase):
 
     def test_sized_approved_status(self):
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
             # No consensus → sizing cannot run → falls back to scaffold_only
@@ -114,8 +114,8 @@ class TestL6SizingApproved(unittest.TestCase):
         ctx.consensus = _make_bullish_consensus(p_bull=0.72)
 
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
         ):
             from tradingbot.graph.pipeline import _run_sizing
             book = GreeksBook(account_size=50_000)
@@ -274,13 +274,13 @@ class TestL7BookState(unittest.TestCase):
     def test_book_state_in_attribution_when_sizing_enabled(self):
         """book_state is always added to attribution when SIZING_ENGINE_ENABLED."""
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             book = GreeksBook(account_size=50_000)
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000, book=book)
@@ -295,13 +295,13 @@ class TestL7BookState(unittest.TestCase):
     def test_book_state_absent_when_sizing_disabled(self):
         """book_state must NOT appear in attribution when SIZING_ENGINE_ENABLED=False."""
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, account_size=50_000)
 
@@ -404,13 +404,13 @@ class TestL8OpenPositionAlerts(unittest.TestCase):
         monitor.add(position)
 
         with (
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, monitor=monitor)
         return ctx
@@ -454,13 +454,13 @@ class TestL8OpenPositionAlerts(unittest.TestCase):
     def test_no_monitor_means_no_alerts(self):
         """monitor=None → open_position_exits is empty."""
         with (
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, monitor=None)
         self.assertEqual(ctx.open_position_exits, [])
@@ -488,13 +488,13 @@ class TestL8OpenPositionAlerts(unittest.TestCase):
         monitor.add(pos)
 
         with (
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY", context_dict=_SPY_MARKET_DATA, monitor=monitor)
         # SPY run should not see AAPL position
@@ -510,24 +510,24 @@ class TestDecisionStatusProgression(unittest.TestCase):
 
     def _flags_off(self):
         return (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         )
 
     def test_scaffold_only_when_all_flags_off(self):
         with (
-            patch("oa2.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
-            patch("oa2.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
+            patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.REGIME_CLASSIFIER_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEBATERS_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.CONSENSUS_ENGINE_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
+            patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
             ctx = run("SPY")
         self.assertEqual(ctx.decision["status"], "scaffold_only")

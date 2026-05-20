@@ -148,7 +148,7 @@ def test_pipeline_with_debaters_enabled():
     # Re-import to pick up new flag
     import importlib
     import tradingbot.core.feature_flags
-    importlib.reload(oa2.core.feature_flags)
+    importlib.reload(tradingbot.core.feature_flags)
 
     context = {
         "ticker": "DIA",
@@ -173,7 +173,7 @@ def test_pipeline_with_debaters_enabled():
 
     # Clean up
     del os.environ["TRADINGBOT_FLAG_DEBATERS"]
-    importlib.reload(oa2.core.feature_flags)
+    importlib.reload(tradingbot.core.feature_flags)
 
 
 if __name__ == "__main__":
