@@ -17,7 +17,7 @@ dist/
 .DS_Store
 
 # Runtime data
-~/.oa2/
+~/.tradingbot/
 data/
 logs/
 cache/
