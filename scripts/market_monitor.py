@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -36,6 +37,23 @@ from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
 
 REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
+
+_lock_socket: socket.socket | None = None
+
+
+def _acquire_instance_lock(port: int = 18500) -> bool:
+    """Acquire a socket bind lock on localhost to prevent duplicate daemons."""
+    global _lock_socket
+    try:
+        _lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if sys.platform != "win32":
+            _lock_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        _lock_socket.bind(("127.0.0.1", port))
+        _lock_socket.listen(1)
+        return True
+    except socket.error:
+        _lock_socket = None
+        return False
 
 
 def _now_et() -> datetime.datetime:
@@ -426,10 +444,16 @@ Check daemon logs:
     # Detect daemon mode (no --once and not --dry-run)
     daemon_mode = not args.once and not args.dry_run
 
+    if daemon_mode:
+        lock_port = int(os.getenv("OA2_MONITOR_LOCK_PORT", "18500"))
+        log_file = _get_daemon_log_path()
+        if not _acquire_instance_lock(lock_port):
+            _log(f"FATAL: Another instance of market_monitor is already running (locked on port {lock_port}). Exiting.", log_file)
+            sys.exit(1)
+
     monitor = MarketMonitor(dry_run=args.dry_run, once=args.once, daemon_mode=daemon_mode, scan_on_start=args.scan_on_start)
 
     if daemon_mode:
-        log_file = _get_daemon_log_path()
         _log(f"Starting daemon mode (logs: {log_file})")
 
     try:

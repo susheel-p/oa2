@@ -8,6 +8,7 @@ Setup:
     2. Add env vars to .env:
          WATCHDOG_STALE_SECONDS=300      # 5 min
          WATCHDOG_MAX_ALERTS=5           # cap
+         WATCHDOG_HEALTH_INTERVAL=3600   # send "all clear" every N successful checks (0=disabled)
     3. Schedule this script to run every 5 min:
        - Linux crontab: */5 * * * * cd /path/to/oa2-new && python scripts/watchdog.py
        - Windows Task Scheduler: Run scripts\\watchdog.py every 5 minutes
@@ -17,6 +18,9 @@ The watchdog maintains state in logs/watchdog_state.json to avoid spam:
 - Tracks alert count and last alert time
 - Resets when heartbeat recovers
 - Caps at WATCHDOG_MAX_ALERTS before silencing
+- Sends recovery notifications when daemon comes back online
+- Writes own heartbeat for outer monitoring
+- Sends periodic "all clear" confirmations (if enabled)
 """
 
 from __future__ import annotations
@@ -43,22 +47,51 @@ from scripts import telegram_notify
 
 OA2_HOME = Path(os.getenv("OA2_HOME", Path(__file__).parent.parent))
 HEARTBEAT_FILE = OA2_HOME / "logs" / "daemon_heartbeat.txt"
+WATCHDOG_HEARTBEAT_FILE = OA2_HOME / "logs" / "watchdog_heartbeat.txt"
 STATE_FILE = OA2_HOME / "logs" / "watchdog_state.json"
+LOG_FILE = OA2_HOME / "logs" / "watchdog.log"
 
 STALE_SECONDS = int(os.getenv("WATCHDOG_STALE_SECONDS", "300"))
 MAX_ALERTS = int(os.getenv("WATCHDOG_MAX_ALERTS", "5"))
 LOOP_INTERVAL = int(os.getenv("WATCHDOG_INTERVAL_SECONDS", "300"))
+HEALTH_INTERVAL = int(os.getenv("WATCHDOG_HEALTH_INTERVAL", "3600"))
+
+
+def _log(msg: str) -> None:
+    """Log to both stdout and file."""
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().isoformat()
+    log_line = f"[{ts}] {msg}"
+    print(log_line)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(log_line + "\n")
+    except Exception as e:
+        print(f"Warning: could not write to {LOG_FILE}: {e}")
 
 
 def _load_state() -> dict:
     """Load watchdog state. Defaults to clean slate."""
     if not STATE_FILE.exists():
-        return {"alerts_sent": 0, "last_alert_time": None, "last_heartbeat_time": None}
+        return {
+            "alerts_sent": 0,
+            "last_alert_time": None,
+            "last_heartbeat_time": None,
+            "last_health_check": None,
+            "was_stale": False,
+        }
     try:
         with open(STATE_FILE) as f:
             return json.load(f)
-    except Exception:
-        return {"alerts_sent": 0, "last_alert_time": None, "last_heartbeat_time": None}
+    except Exception as e:
+        _log(f"Warning: watchdog state corrupted, resetting: {e}")
+        return {
+            "alerts_sent": 0,
+            "last_alert_time": None,
+            "last_heartbeat_time": None,
+            "last_health_check": None,
+            "was_stale": False,
+        }
 
 
 def _save_state(state: dict) -> None:
@@ -69,6 +102,16 @@ def _save_state(state: dict) -> None:
             json.dump(state, f)
     except Exception as e:
         print(f"Warning: could not save watchdog state: {e}")
+
+
+def _write_watchdog_heartbeat() -> None:
+    """Write watchdog's own heartbeat for outer monitoring."""
+    WATCHDOG_HEARTBEAT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(WATCHDOG_HEARTBEAT_FILE, "w") as f:
+            f.write(str(time.time()))
+    except Exception as e:
+        _log(f"Warning: could not write watchdog heartbeat: {e}")
 
 
 def _get_heartbeat_age() -> float | None:
@@ -84,27 +127,69 @@ def _get_heartbeat_age() -> float | None:
 
 def check_daemon() -> bool:
     """
-    Check daemon liveness. Send alert if stale.
-    Returns True if daemon is healthy, False if stale and alert sent (or should send).
+    Check daemon liveness. Send alerts if stale, recovery if it comes back.
+    Returns True if daemon is healthy, False if stale.
     """
     state = _load_state()
     age = _get_heartbeat_age()
+    now = time.time()
 
-    # Daemon is healthy — reset state
+    # Write watchdog's own heartbeat
+    _write_watchdog_heartbeat()
+
+    # Daemon is healthy
     if age is not None and age <= STALE_SECONDS:
-        if state.get("alerts_sent", 0) > 0:
-            print(f"[OK] Daemon recovered (heartbeat age {age:.0f}s)")
-        state = {"alerts_sent": 0, "last_alert_time": None, "last_heartbeat_time": time.time()}
+        was_stale = state.get("was_stale", False)
+        alerts_sent = state.get("alerts_sent", 0)
+
+        # Send recovery notification if daemon just came back
+        if was_stale and alerts_sent > 0:
+            recovery_msg = (
+                f"[RECOVERED] oa2 daemon is healthy again\n"
+                f"Heartbeat age: {age:.0f}s\n"
+                f"Sent {alerts_sent} alerts before recovery"
+            )
+            if telegram_notify.send(recovery_msg):
+                _log(f"[OK] Recovery notification sent (was {alerts_sent} alerts)")
+            else:
+                _log(f"[WARN] Recovery notification failed to send")
+
+        # Send periodic health confirmation if enabled
+        last_health = state.get("last_health_check")
+        if HEALTH_INTERVAL > 0 and (last_health is None or now - last_health >= HEALTH_INTERVAL):
+            health_msg = (
+                "[HEALTHY] oa2 daemon operating normally\n"
+                f"Heartbeat age: {age:.0f}s\n"
+                f"Watchdog: {LOOP_INTERVAL}s interval"
+            )
+            if telegram_notify.send(health_msg):
+                state["last_health_check"] = now
+                _log(f"[OK] Health confirmation sent")
+            else:
+                _log(f"[WARN] Health confirmation failed to send")
+
+        # Reset stale state
+        state = {
+            "alerts_sent": 0,
+            "last_alert_time": None,
+            "last_heartbeat_time": now,
+            "last_health_check": state.get("last_health_check"),
+            "was_stale": False,
+        }
         _save_state(state)
         return True
 
-    # Daemon is stale
+    # Daemon is stale or missing
     alerts_sent = state.get("alerts_sent", 0)
+
+    # Check if we've already hit the alert cap
     if alerts_sent >= MAX_ALERTS:
-        print(f"[WARN] Daemon stale (age {age:.0f}s) — max alerts ({MAX_ALERTS}) reached, silencing")
+        _log(f"[WARN] Daemon stale (age {age}s if exists) — max alerts ({MAX_ALERTS}) reached, silencing")
+        state["was_stale"] = True
+        _save_state(state)
         return False
 
-    # Send alert
+    # Compose alert message
     if age is None:
         msg = (
             "[ALERT] oa2 daemon not started yet\n"
@@ -119,15 +204,19 @@ def check_daemon() -> bool:
             f"Restart: python scripts/market_monitor.py"
         )
 
+    # Send alert — only increment counter if send succeeds
     if telegram_notify.send(msg):
-        print(f"[OK] Alert {alerts_sent + 1}/{MAX_ALERTS} sent: daemon stale (age {age}s)")
+        alerts_sent_new = alerts_sent + 1
+        _log(f"[OK] Alert {alerts_sent_new}/{MAX_ALERTS} sent: daemon stale (age {age}s if exists)")
+        state["alerts_sent"] = alerts_sent_new
+        state["last_alert_time"] = datetime.now().isoformat()
+        state["last_heartbeat_time"] = time.time() if age is not None else None
+        state["was_stale"] = True
+        _save_state(state)
     else:
-        print(f"[WARN] Telegram alert failed, but daemon is stale (age {age}s)")
+        _log(f"[WARN] Telegram send failed (alert not counted); daemon is stale (age {age}s if exists)")
+        # Don't increment counter or update state — retry next cycle
 
-    state["alerts_sent"] = alerts_sent + 1
-    state["last_alert_time"] = datetime.now().isoformat()
-    state["last_heartbeat_time"] = time.time() if age is not None else None
-    _save_state(state)
     return False
 
 
@@ -143,9 +232,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.loop:
-        print(f"Watchdog loop started (interval {LOOP_INTERVAL}s, stale threshold {STALE_SECONDS}s)")
+        _log(
+            f"Watchdog loop started (interval {LOOP_INTERVAL}s, "
+            f"stale threshold {STALE_SECONDS}s, max alerts {MAX_ALERTS})"
+        )
         while True:
-            check_daemon()
+            try:
+                check_daemon()
+            except Exception as e:
+                _log(f"[ERROR] Watchdog check failed: {e}")
             time.sleep(LOOP_INTERVAL)
     else:
         check_daemon()
