@@ -523,55 +523,19 @@ def _write_daily_summary_html(
     approved_recs: list,
     rejected_recs: list,
 ) -> None:
-    """Render plain-English HTML combining the day's premarket + postmarket story."""
+    """Render clean executive summary with KPIs, trades table, and links to full reports."""
     import html as _html
-
-    premarket_md = day_dir / "premarket.md"
-    postmarket_md = day_dir / "postmarket.md"
-    premarket_text = premarket_md.read_text(encoding="utf-8") if premarket_md.exists() else ""
-    postmarket_text = postmarket_md.read_text(encoding="utf-8") if postmarket_md.exists() else ""
 
     n_scanned = summary_data.get("tickers_scanned", len(scan_records))
     n_approved = summary_data.get("approved_count", len(approved_recs))
     n_rejected = summary_data.get("rejected_count", len(rejected_recs))
     n_exits = summary_data.get("exit_alert_count", len(exit_alerts))
-    n_open = len([p for p in positions_data if isinstance(p, dict)])
 
-    # Plain-English narrative
-    paragraphs = []
-    paragraphs.append(
-        f"Going into the {report_date} session, the scanner reviewed {n_scanned} tickers. "
-        f"Of those, {n_approved} cleared every sizing gate and were approved for trading, "
-        f"while {n_rejected} were turned down — typically by the Kelly sizer, CVaR stress check, "
-        f"or Greek caps."
-    )
+    # Load executions for executed trades table
+    log_dir = _get_log_dir()
+    entry_execs, exit_execs = _load_executions(log_dir, report_date)
 
-    if n_open:
-        tickers = ", ".join(
-            sorted({p.get("ticker", "?") for p in positions_data if isinstance(p, dict)})
-        )
-        paragraphs.append(
-            f"By the close, {n_open} position(s) were on the book: {tickers}."
-        )
-    else:
-        paragraphs.append("By the close, no positions were actually opened on the book.")
-
-    if n_exits:
-        paragraphs.append(
-            f"The exit monitor fired {n_exits} alert(s) during the session — "
-            "see the Exit Events table below for the details and realized P&L."
-        )
-    else:
-        paragraphs.append("The exit monitor stayed quiet — no stop, profit-target, or DTE alerts fired.")
-
-    if rejected_recs:
-        top_reasons: dict[str, int] = {}
-        for r in rejected_recs:
-            reason = (r.get("decision") or {}).get("sizing_reject_reason", "Unknown")
-            top_reasons[reason] = top_reasons.get(reason, 0) + 1
-        top = sorted(top_reasons.items(), key=lambda kv: -kv[1])[:3]
-        reason_str = "; ".join(f"{r} ({n})" for r, n in top)
-        paragraphs.append(f"Most common rejection reasons: {reason_str}.")
+    open_positions = [p for p in positions_data if isinstance(p, dict)]
 
     html_parts: list[str] = []
     html_parts.append("<!doctype html><html><head><meta charset='utf-8'>")
@@ -579,44 +543,131 @@ def _write_daily_summary_html(
     html_parts.append(
         "<style>"
         "body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;"
-        "max-width:880px;margin:2rem auto;padding:0 1rem;color:#222;line-height:1.55}"
-        "h1{border-bottom:2px solid #333;padding-bottom:.3rem}"
-        "h2{margin-top:2rem;color:#1a4480}"
-        "pre{background:#f5f5f5;padding:1rem;border-radius:6px;overflow-x:auto;"
-        "white-space:pre-wrap;font-size:.9rem}"
-        ".kpis{display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0}"
-        ".kpi{background:#eef3fb;padding:.5rem 1rem;border-radius:6px}"
-        ".kpi b{display:block;font-size:1.4rem;color:#1a4480}"
+        "max-width:900px;margin:2rem auto;padding:0 1rem;color:#222;line-height:1.6}"
+        "h1{border-bottom:3px solid #333;padding-bottom:.5rem;margin-bottom:1.5rem}"
+        "h2{margin-top:2rem;margin-bottom:1rem;color:#1a4480;font-size:1.1rem;border-left:4px solid #1a4480;padding-left:.8rem}"
+        ".kpis{display:flex;gap:1rem;flex-wrap:wrap;margin:1.5rem 0;margin-bottom:2.5rem}"
+        ".kpi{background:#eef3fb;padding:.8rem 1.2rem;border-radius:6px;text-align:center;min-width:120px}"
+        ".kpi b{display:block;font-size:1.6rem;color:#1a4480;margin-bottom:.3rem}"
+        ".kpi span{font-size:.85rem;color:#666}"
+        "table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.95rem}"
+        "th,td{padding:.6rem;text-align:left;border-bottom:1px solid #ddd}"
+        "th{background:#f0f0f0;font-weight:600;color:#333}"
+        "tr:hover{background:#f9f9f9}"
+        ".summary-text{margin:1rem 0;line-height:1.7;color:#444}"
+        ".no-data{color:#999;font-style:italic;padding:1rem}"
+        ".links{margin-top:2.5rem;padding-top:1.5rem;border-top:1px solid #ddd;font-size:.95rem}"
+        ".links a{color:#1a4480;text-decoration:none;margin-right:1.5rem;font-weight:500}"
+        ".links a:hover{text-decoration:underline}"
         "</style></head><body>"
     )
-    html_parts.append(f"<h1>Daily Trading Summary — {_html.escape(report_date)}</h1>")
+
+    html_parts.append(f"<h1>Trading Summary — {_html.escape(report_date)}</h1>")
     html_parts.append(
-        f"<p><em>Generated {_html.escape(_now_et().strftime('%Y-%m-%d %H:%M:%S %Z'))}.</em></p>"
+        f"<p style='color:#666;margin-bottom:1.5rem'>"
+        f"<em>Generated {_html.escape(_now_et().strftime('%Y-%m-%d %H:%M:%S %Z'))}</em></p>"
     )
 
+    # KPIs
     html_parts.append("<div class='kpis'>")
     for label, val in [
-        ("Scanned", n_scanned), ("Approved", n_approved), ("Rejected", n_rejected),
-        ("Open Positions", n_open), ("Exit Alerts", n_exits),
+        ("Scanned", n_scanned),
+        ("Approved", n_approved),
+        ("Rejected", n_rejected),
+        ("Executed", len(entry_execs)),
+        ("Open", len(open_positions)),
     ]:
-        html_parts.append(f"<div class='kpi'><b>{val}</b>{_html.escape(label)}</div>")
+        html_parts.append(f"<div class='kpi'><b>{val}</b><span>{_html.escape(label)}</span></div>")
     html_parts.append("</div>")
 
-    html_parts.append("<h2>What happened today</h2>")
-    for p in paragraphs:
-        html_parts.append(f"<p>{_html.escape(p)}</p>")
+    # Premarket Plan
+    html_parts.append("<h2>📋 Premarket Plan</h2>")
+    html_parts.append(f"<div class='summary-text'>Identified {n_approved} trades ready to execute. {n_rejected} were rejected by sizing gates.</div>")
 
-    html_parts.append("<h2>Premarket setup (plan going in)</h2>")
-    if premarket_text:
-        html_parts.append(f"<pre>{_html.escape(premarket_text)}</pre>")
+    # Executed Trades
+    html_parts.append("<h2>✅ Executed Trades</h2>")
+    if entry_execs:
+        html_parts.append(
+            "<table>"
+            "<tr><th>Ticker</th><th>Direction</th><th>Structure</th><th>Contracts</th><th>Entry Price</th><th>Status</th></tr>"
+        )
+        for exec_rec in entry_execs:
+            ticker = exec_rec.get("ticker", "?")
+            direction = exec_rec.get("direction", "?")
+            structure = exec_rec.get("structure", "?")
+            contracts = exec_rec.get("contracts", 0)
+            legs = exec_rec.get("legs", [])
+            avg_fill = next((l.get("avg_fill_price", 0) for l in legs if not l.get("error")), 0)
+            leg_status = ", ".join(
+                f"leg{l.get('leg')}={l.get('status', '?')}"
+                for l in legs if not l.get("error")
+            ) or "error"
+            html_parts.append(
+                f"<tr><td><strong>{_html.escape(ticker)}</strong></td><td>{_html.escape(direction)}</td>"
+                f"<td>{_html.escape(structure)}</td><td>{contracts}</td>"
+                f"<td>{_fmt_price(avg_fill)}</td><td>{_html.escape(leg_status)}</td></tr>"
+            )
+        html_parts.append("</table>")
     else:
-        html_parts.append("<p><em>No premarket report was generated for this date.</em></p>")
+        html_parts.append("<div class='no-data'>No trades executed today.</div>")
 
-    html_parts.append("<h2>Postmarket recap (what actually happened)</h2>")
-    if postmarket_text:
-        html_parts.append(f"<pre>{_html.escape(postmarket_text)}</pre>")
+    # Open Positions
+    html_parts.append("<h2>📊 Open Positions</h2>")
+    if open_positions:
+        html_parts.append(
+            "<table>"
+            "<tr><th>Ticker</th><th>Direction</th><th>Contracts</th><th>Entry Price</th><th>Current P&L</th></tr>"
+        )
+        for pos in open_positions:
+            ticker = pos.get("ticker", "?")
+            direction = pos.get("direction", "?")
+            contracts = pos.get("contracts", 0)
+            entry_price = pos.get("entry_price", 0)
+            pnl = pos.get("current_pnl", 0)
+            html_parts.append(
+                f"<tr><td><strong>{_html.escape(ticker)}</strong></td><td>{_html.escape(direction)}</td>"
+                f"<td>{contracts}</td><td>{_fmt_price(entry_price)}</td><td><strong>{_fmt_dollar(pnl)}</strong></td></tr>"
+            )
+        html_parts.append("</table>")
     else:
-        html_parts.append("<p><em>No postmarket report was generated for this date.</em></p>")
+        html_parts.append("<div class='no-data'>No open positions.</div>")
+
+    # Postmarket Summary
+    html_parts.append("<h2>📈 Postmarket Summary</h2>")
+    summary_lines = []
+    if entry_execs:
+        summary_lines.append(f"{len(entry_execs)} trade(s) executed")
+    if open_positions:
+        summary_lines.append(f"{len(open_positions)} position(s) open")
+    if n_exits:
+        summary_lines.append(f"{n_exits} exit alert(s) fired")
+
+    if summary_lines:
+        summary = " · ".join(summary_lines)
+        html_parts.append(f"<div class='summary-text'>{summary}.</div>")
+    else:
+        html_parts.append("<div class='summary-text'>No trading activity today.</div>")
+
+    # Top rejection reasons (brief)
+    if rejected_recs:
+        top_reasons: dict[str, int] = {}
+        for r in rejected_recs:
+            reason = (r.get("decision") or {}).get("sizing_reject_reason", "Unknown")
+            top_reasons[reason] = top_reasons.get(reason, 0) + 1
+        top = sorted(top_reasons.items(), key=lambda kv: -kv[1])[:2]
+        if top:
+            reason_str = "; ".join(f"{r} ({n})" for r, n in top)
+            html_parts.append(
+                f"<div class='summary-text' style='color:#666;font-size:.95rem'>"
+                f"<strong>Why {n_rejected} were rejected:</strong> {reason_str}</div>"
+            )
+
+    # Links to full reports
+    html_parts.append("<div class='links'>")
+    html_parts.append("<strong>📎 Full Reports</strong><br><br>")
+    html_parts.append("<a href='premarket.md'>Premarket Setup (detailed plan)</a><br>")
+    html_parts.append("<a href='postmarket.md'>Postmarket Detail (full breakdown)</a>")
+    html_parts.append("</div>")
 
     html_parts.append("</body></html>")
 
