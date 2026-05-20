@@ -34,7 +34,7 @@ from oa2.sizing.kelly import size_from_consensus
 from oa2.sizing.limits import GreeksBook
 from oa2.sizing.mc_cvar import MonteCarloCVaR
 
-_DEFAULT_ACCOUNT_SIZE = 50_000.0
+_DEFAULT_ACCOUNT_SIZE = float(os.getenv("ACCOUNT_SIZE", "50000"))
 
 
 # =============================================================================

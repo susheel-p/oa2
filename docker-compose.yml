@@ -30,8 +30,8 @@ services:
       - ./reports:/app/reports
 
       # Persistent oa2 data: outcomes, KB, calibration, bandit priors
-      # Use named Docker volume (survives container restart)
-      - oa2-data:/data/oa2
+      # Bind mount to host for easy access, backup, and durability
+      - ./.oa2:/data/oa2
 
     # Allow container to reach host's moomoo OpenD (port 11111)
     extra_hosts:
@@ -45,7 +45,3 @@ services:
       retries: 3
       start_period: 30s
 
-# Named volume for persistent ML state (knowledge base, outcomes, calibration)
-volumes:
-  oa2-data:
-    driver: local

@@ -40,8 +40,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 try:
-    from scripts import telegram_notify
-except Exception:
+    import telegram_notify
+except Exception as e:
+    print(f"WARNING: Failed to import telegram_notify: {e}")
+    import traceback
+    traceback.print_exc()
     telegram_notify = None  # type: ignore
 
 # ── Force all feature flags ON before any oa2 import ──────────────────────────
@@ -720,9 +723,17 @@ def main() -> None:
 
                 if telegram_notify is not None:
                     try:
-                        telegram_notify.notify_trade(ticker, result, fills or None)
+                        success = telegram_notify.notify_trade(ticker, result, fills or None)
+                        if success:
+                            _log(f"      [TG] Alert sent via Telegram")
+                        else:
+                            _log(f"      [TG] Alert failed (API returned False)")
                     except Exception as e:
                         _log(f"      [TG] notify failed: {e}")
+                        import traceback
+                        _log(f"      [TG] traceback: {traceback.format_exc()}")
+                else:
+                    _log(f"      [TG] telegram_notify module not loaded")
 
             elif status == "sized_rejected":
                 reason = (result.get("sizing") or {}).get("reject_reason", "")
@@ -753,9 +764,17 @@ def main() -> None:
 
     if telegram_notify is not None:
         try:
-            telegram_notify.notify_summary(summary)
+            success = telegram_notify.notify_summary(summary)
+            if success:
+                _log(f"[TG] Summary alert sent via Telegram")
+            else:
+                _log(f"[TG] Summary alert failed (API returned False)")
         except Exception as e:
             _log(f"[TG] summary notify failed: {e}")
+            import traceback
+            _log(f"[TG] traceback: {traceback.format_exc()}")
+    else:
+        _log(f"[TG] telegram_notify module not loaded for summary")
 
     _log("-" * 60)
     _log(f"Run complete: {summary['approved_count']} approved, "

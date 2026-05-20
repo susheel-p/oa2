@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from oa2.core.config import oa2_home
@@ -19,18 +21,40 @@ def bandit_path(path: Path | None = None) -> Path:
 
 
 def save_posteriors(posteriors: dict[tuple[str, int], BetaPosterior], path: Path | None = None) -> None:
-    """Serialize posteriors to JSON file.
+    """Serialize posteriors to JSON file atomically.
 
     Tuple keys (debater_name, regime_id) are serialized as "debater_name:regime_id".
+    Snapshots before overwrite to bandit_versions/ for audit trail.
     """
     path = bandit_path(path)
+
+    # Snapshot the current posteriors before overwriting
+    if path.exists():
+        try:
+            from oa2.learning.versioning import snapshot_bandit
+            snapshot_bandit("save_posteriors")
+        except Exception:
+            pass
+
     serialized = {}
     for (debater_name, regime_id), posterior in posteriors.items():
         key = f"{debater_name}:{regime_id}"
         serialized[key] = {"alpha": posterior.alpha, "beta": posterior.beta}
 
-    with open(path, "w") as f:
-        json.dump(serialized, f, indent=2)
+    # Atomic write: write to temp file, then rename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as tmp:
+        json.dump(serialized, tmp, indent=2)
+        tmp_path = tmp.name
+
+    try:
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        raise
 
 
 def load_posteriors(path: Path | None = None) -> dict[tuple[str, int], BetaPosterior]:

@@ -70,7 +70,12 @@ def format_trade(
     p_bull = decision.get("p_bull")
     direction = decision.get("direction", "?")
     contracts = sizing.get("contracts", 0)
+
+    # Extract Kelly from sizing.kelly if kelly_fraction not available
     kelly = sizing.get("kelly_fraction")
+    if not isinstance(kelly, (int, float)) and isinstance(sizing.get("kelly"), dict):
+        kelly = sizing["kelly"].get("kelly_f")
+
     structure = pick.get("structure", "?")
     short_k = pick.get("short_strike")
     long_k = pick.get("long_strike")
@@ -78,10 +83,19 @@ def format_trade(
 
     lines = [
         f"oa2 APPROVED -- {ticker} {direction}",
-        f"Structure: {structure}  {short_k}/{long_k}  exp {expiry}",
-        f"Size: {contracts} contract(s)"
-        + (f"  Kelly={kelly:.2%}" if isinstance(kelly, (int, float)) else ""),
     ]
+
+    # Build structure line with safe formatting
+    if short_k is not None and long_k is not None:
+        lines.append(f"Structure: {structure}  {short_k}/{long_k}  exp {expiry}")
+    else:
+        lines.append(f"Structure: {structure}  exp {expiry}")
+
+    lines.append(
+        f"Size: {contracts} contract(s)"
+        + (f"  Kelly={kelly:.2%}" if isinstance(kelly, (int, float)) else "")
+    )
+
     if isinstance(p_bull, (int, float)):
         lines.append(f"p_bull = {p_bull:.3f}")
     if fills:

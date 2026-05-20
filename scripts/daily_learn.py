@@ -34,6 +34,10 @@ from oa2.learning.knowledge_base import (
     build_from_outcomes,
     default_kb_path,
 )
+from oa2.learning.versioning import (
+    snapshot_kb, snapshot_bandit, diff_kb, diff_bandit,
+    learning_events_path, kb_path, bandit_path,
+)
 
 
 REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
@@ -251,6 +255,38 @@ def _write_report(content: str, dry_run: bool) -> Path:
     return path
 
 
+# ----- Performance snapshot helper -----------------------------------------------
+
+def _compute_perf_snapshot(outcomes: list[dict], days: int = 30) -> dict:
+    """Compute win rate, avg P&L, and count for last N days."""
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).timestamp()
+    recent = []
+    for outcome in outcomes:
+        try:
+            ts = datetime.datetime.fromisoformat(outcome.get("resolution_date", "1970-01-01")).timestamp()
+            if ts >= cutoff:
+                recent.append(outcome)
+        except Exception:
+            pass
+
+    if not recent:
+        return {
+            "last_30d_win_rate": 0.5,
+            "last_30d_avg_pnl": 0.0,
+            "last_30d_n_trades": 0,
+        }
+
+    hits = sum(1 for o in recent if o.get("direction_hit", False))
+    total_pnl = sum(o.get("total_pnl_dollars", 0.0) for o in recent)
+    win_rate = hits / len(recent) if recent else 0.5
+
+    return {
+        "last_30d_win_rate": round(win_rate, 4),
+        "last_30d_avg_pnl": round(total_pnl / len(recent) if recent else 0.0, 2),
+        "last_30d_n_trades": len(recent),
+    }
+
+
 # ----- Main -----------------------------------------------------------------
 
 def main() -> int:
@@ -288,6 +324,17 @@ def main() -> int:
     print(f"\nFinal KB: {len(kb.tickers)} tickers, {len(kb.regimes)} regimes, "
           f"{kb.n_outcomes_used} total observations.")
 
+    # === Versioning: snapshot before write ===
+    pre_kb_version_id = ""
+    pre_bandit_version_id = ""
+    if not args.dry_run:
+        try:
+            pre_kb_version_id = snapshot_kb("before_nightly_learn")
+            pre_bandit_version_id = snapshot_bandit("before_nightly_learn")
+            print(f"Snapshots created: KB {pre_kb_version_id}, Bandit {pre_bandit_version_id}")
+        except Exception as e:
+            print(f"Warning: snapshot failed: {e}")
+
     # Save KB
     kb_path = default_kb_path()
     if not args.dry_run:
@@ -314,6 +361,61 @@ def main() -> int:
         print(f"(dry-run: would write blacklist to {bl_path})")
         if bl_tickers:
             print(f"  Would blacklist: {', '.join(bl_tickers)}")
+
+    # === Versioning: snapshot after write and compute diffs ===
+    post_kb_version_id = ""
+    post_bandit_version_id = ""
+    kb_diff_dict = {}
+    bandit_diff_dict = {}
+    if not args.dry_run:
+        try:
+            post_kb_version_id = snapshot_kb("after_nightly_learn")
+            post_bandit_version_id = snapshot_bandit("after_nightly_learn")
+
+            # Compute diffs
+            old_kb_path = kb_path().parent / "kb_versions" / f"kb_{pre_kb_version_id}.json"
+            new_kb_path = kb_path()
+            if old_kb_path.exists():
+                kb_diff = diff_kb(old_kb_path, new_kb_path)
+                kb_diff_dict = kb_diff.to_dict()
+
+            old_bandit_path = bandit_path().parent.parent / "bandit_versions" / f"posteriors_{pre_bandit_version_id}.json"
+            new_bandit_path = bandit_path()
+            if old_bandit_path.exists() and new_bandit_path.exists():
+                bandit_diff = diff_bandit(old_bandit_path, new_bandit_path)
+                bandit_diff_dict = bandit_diff.to_dict()
+
+            print(f"Post-snapshots created: KB {post_kb_version_id}, Bandit {post_bandit_version_id}")
+            if kb_diff_dict.get("n_tickers_affected", 0) > 0:
+                print(f"  KB diffs: {kb_diff_dict['n_tickers_affected']} ticker multipliers, "
+                      f"{len(kb_diff_dict.get('blacklist_changes', []))} blacklist changes")
+        except Exception as e:
+            print(f"Warning: post-snapshot or diff failed: {e}")
+
+    # === Log learning event ===
+    if not args.dry_run and (pre_kb_version_id or post_kb_version_id):
+        try:
+            perf_snapshot = _compute_perf_snapshot(outcomes, days=30)
+            event = {
+                "event_id": f"learn_{post_kb_version_id or 'unknown'}",
+                "ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+                "event_type": "daily_learn",
+                "n_outcomes_used": kb.n_outcomes_used,
+                "window_days": args.window,
+                "pre_kb_version_id": pre_kb_version_id,
+                "post_kb_version_id": post_kb_version_id,
+                "pre_bandit_version_id": pre_bandit_version_id,
+                "post_bandit_version_id": post_bandit_version_id,
+                "kb_diff": kb_diff_dict,
+                "bandit_diff": bandit_diff_dict,
+                "perf_snapshot": perf_snapshot,
+            }
+            events_path = learning_events_path()
+            with open(events_path, "a") as f:
+                f.write(json.dumps(event) + "\n")
+            print(f"Learning event logged: {events_path}")
+        except Exception as e:
+            print(f"Warning: learning event logging failed: {e}")
 
     # Generate report
     report = _report_markdown(kb)
