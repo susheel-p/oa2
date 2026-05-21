@@ -1,13 +1,13 @@
 version: '3.8'
 
 services:
-  oa2-daemon:
+  tradingbot-daemon:
     build:
       context: .
       target: prod
       dockerfile: Dockerfile
-    image: oa2-daemon:latest
-    container_name: oa2-daemon
+    image: tradingbot-daemon:latest
+    container_name: tradingbot-daemon
     restart: unless-stopped
 
     # Load .env file for broker credentials and other config
@@ -16,7 +16,7 @@ services:
     # Override/set specific environment variables for Docker
     environment:
       - TZ=America/New_York
-      - OA2_HOME=/data/oa2
+      - TRADINGBOT_HOME=/data/tradingbot
       - REPORTS_DIR=/app/reports
       - MOOMOO_OPEND_HOST=host.docker.internal
       - PYTHONUNBUFFERED=1
@@ -29,9 +29,9 @@ services:
       # Reports: bind to local ./reports for viewing daily/weekly markdown
       - ./reports:/app/reports
 
-      # Persistent oa2 data: outcomes, KB, calibration, bandit priors
+      # Persistent tradingbot data: outcomes, KB, calibration, bandit priors
       # Bind mount to host for easy access, backup, and durability
-      - ./.oa2:/data/oa2
+      - ./data/tradingbot:/data/tradingbot
 
     # Allow container to reach host's moomoo OpenD (port 11111)
     extra_hosts:

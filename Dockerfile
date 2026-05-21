@@ -1,4 +1,4 @@
-# Multi-stage build for oa2 daemon
+# Multi-stage build for tradingbot daemon
 # Stage 1: base — Python environment + dependencies
 FROM python:3.12-slim AS base
 
@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir supervisor
 
 # Copy dependency spec first for better layer caching
 COPY pyproject.toml .
-COPY oa2/ oa2/
+COPY tradingbot/ tradingbot/
 COPY scripts/ scripts/
 COPY docs/ docs/
 COPY supervisord.conf .
