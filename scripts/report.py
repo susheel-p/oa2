@@ -595,6 +595,9 @@ def _write_daily_summary_html(
     # Executed Trades
     html_parts.append("<h2>✅ Executed Trades</h2>")
     if entry_execs:
+        # Build lookup of ticker -> scan record for entry prices
+        scan_by_ticker = {r.get("ticker"): r for r in scan_records if r.get("status") == "sized_approved"}
+
         html_parts.append(
             "<table>"
             "<tr><th>Ticker</th><th>Direction</th><th>Structure</th><th>Contracts</th><th>Entry Price</th><th>Status</th></tr>"
@@ -606,19 +609,23 @@ def _write_daily_summary_html(
             contracts = exec_rec.get("contracts", 0)
             legs = exec_rec.get("legs", [])
             is_dry_run = exec_rec.get("dry_run", False)
+
+            # Get entry price from scan record (planned price) or leg fills (actual)
             if is_dry_run:
-                avg_fill = 0
+                scan_rec = scan_by_ticker.get(ticker)
+                entry_price = scan_rec.get("entry_price", 0) if scan_rec else 0
                 leg_status = "DRY-RUN"
             else:
-                avg_fill = next((l.get("avg_fill_price", 0) for l in legs if not l.get("error")), 0)
+                entry_price = next((l.get("avg_fill_price", 0) for l in legs if not l.get("error")), 0)
                 leg_status = ", ".join(
                     f"leg{l.get('leg')}={l.get('status', '?')}"
                     for l in legs if not l.get("error")
                 ) or "error"
+
             html_parts.append(
                 f"<tr><td><strong>{_html.escape(ticker)}</strong></td><td>{_html.escape(direction)}</td>"
                 f"<td>{_html.escape(structure)}</td><td>{contracts}</td>"
-                f"<td>{_fmt_price(avg_fill)}</td><td>{_html.escape(leg_status)}</td></tr>"
+                f"<td>{_fmt_price(entry_price)}</td><td>{_html.escape(leg_status)}</td></tr>"
             )
         html_parts.append("</table>")
     else:
