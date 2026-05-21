@@ -42,15 +42,26 @@ docker compose down
 **Host (Windows)**
 ```
 ├── moomoo OpenD (port 11111) — must run on host
-├── Docker Desktop
-└── docker-compose
-    └── tradingbot-daemon container
-        ├── market_monitor.py   (main daemon)
-        ├── watchdog.py         (sidecar monitor)
-        └── Volume mounts
-            ├── ./logs/         → /app/logs
-            ├── ./reports/      → /app/reports
-            └── tradingbot-data        → /data/tradingbot (named volume)
+├── Project root: c:\Users\pamed\Susheel\oa2-new
+│   ├── tradingbot/    (source code)
+│   ├── scripts/
+│   ├── tests/
+│   └── docker-compose.yml
+│
+└── Docker Data Directory: c:\Users\pamed\Susheel\tradingbot-docker
+    ├── logs/          ← daemon.log, heartbeats, paper trades
+    ├── reports/       ← daily premarket/postmarket, weekly analysis
+    └── data/
+        └── tradingbot/  ← knowledge_base.json, outcomes, calibration
+            └── logs/    (within container's /data/tradingbot)
+
+Docker Container: tradingbot-daemon
+├── market_monitor.py   (main daemon)
+├── watchdog.py         (sidecar monitor)
+└── Volume mounts
+    ├── C:\Users\pamed\Susheel\tradingbot-docker\logs → /app/logs
+    ├── C:\Users\pamed\Susheel\tradingbot-docker\reports → /app/reports
+    └── C:\Users\pamed\Susheel\tradingbot-docker\data\tradingbot → /data/tradingbot
 ```
 
 ---
@@ -83,11 +94,11 @@ The compose file sets this automatically for Windows/Mac Docker Desktop.
 
 ## Volume Mounts Explained
 
-| Mount | Type | Purpose | Browseable |
-|-------|------|---------|-----------|
-| `./logs` | bind mount | daemon.log, paper_trade logs, heartbeats | ✅ Yes (local `./logs/`) |
-| `./reports` | bind mount | daily premarket.md, postmarket.md, weekly_analysis.md | ✅ Yes (local `./reports/`) |
-| `tradingbot-data` | named volume | knowledge_base.json, outcomes history, calibration priors | ⚠️ Docker managed (use docker cp) |
+| Mount | Type | Purpose | Location |
+|-------|------|---------|----------|
+| logs | bind mount | daemon.log, paper_trade logs, heartbeats | `C:\Users\pamed\Susheel\tradingbot-docker\logs` |
+| reports | bind mount | daily premarket.md, postmarket.md, weekly_analysis.md | `C:\Users\pamed\Susheel\tradingbot-docker\reports` |
+| tradingbot data | bind mount | knowledge_base.json, outcomes history, calibration priors | `C:\Users\pamed\Susheel\tradingbot-docker\data\tradingbot` |
 
 **Persistent state** (never lost on container restart):
 - All outcomes from live trading
@@ -282,5 +293,5 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml down --rmi local
 2. Start moomoo OpenD on the host
 3. Run `docker compose build` to validate the Dockerfile
 4. Run `docker compose up -d` to start the daemon
-5. Watch `./logs/daemon.log` for the first run
-6. Verify premarket report appears in `./reports/` at 8:30 AM ET
+5. Watch logs in `C:\Users\pamed\Susheel\tradingbot-docker\logs\daemon.log`
+6. Verify premarket report appears in `C:\Users\pamed\Susheel\tradingbot-docker\reports\` at 8:30 AM ET

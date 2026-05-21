@@ -21,17 +21,16 @@ services:
       - MOOMOO_OPEND_HOST=host.docker.internal
       - PYTHONUNBUFFERED=1
 
-    # Volume mounts
+    # Volume mounts (external directory for Docker artifacts)
     volumes:
-      # Logs: bind to local ./logs for easy access
-      - ./logs:/app/logs
+      # Logs: bind to C:\Users\pamed\Susheel\tradingbot-docker\logs
+      - C:\Users\pamed\Susheel\tradingbot-docker\logs:/app/logs
 
-      # Reports: bind to local ./reports for viewing daily/weekly markdown
-      - ./reports:/app/reports
+      # Reports: bind to C:\Users\pamed\Susheel\tradingbot-docker\reports
+      - C:\Users\pamed\Susheel\tradingbot-docker\reports:/app/reports
 
-      # Persistent tradingbot data: outcomes, KB, calibration, bandit priors
-      # Bind mount to host for easy access, backup, and durability
-      - ./data/tradingbot:/data/tradingbot
+      # Persistent tradingbot data: bind to C:\Users\pamed\Susheel\tradingbot-docker\data\tradingbot
+      - C:\Users\pamed\Susheel\tradingbot-docker\data\tradingbot:/data/tradingbot
 
     # Allow container to reach host's moomoo OpenD (port 11111)
     extra_hosts:
