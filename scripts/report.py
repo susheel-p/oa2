@@ -403,10 +403,11 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
     # Section 2: Executed Trades
     lines.append("## Executed Trades")
     lines.append("")
-    if entry_execs:
+    real_entries = [e for e in entry_execs if not e.get("dry_run")]
+    if real_entries:
         lines.append("| Time | Ticker | Direction | Structure | Contracts | Leg Status | Trigger |")
         lines.append("|------|--------|-----------|-----------|-----------|-----------|---------|")
-        for exec_rec in entry_execs:
+        for exec_rec in real_entries:
             ts = exec_rec.get("ts", "?")[:16]
             ticker = exec_rec.get("ticker", "?")
             direction = exec_rec.get("direction", "?")
@@ -445,20 +446,24 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
             ticker = exit_rec.get("ticker", "?")
             reason = exit_rec.get("exit_reason", "?")
             urgency = exit_rec.get("exit_urgency", "?")
-            pnl = exit_rec.get("current_pnl", 0)
+            pnl = exit_rec.get("current_pnl") or 0
             lines.append(f"| {ts} | {ticker} | {reason} | {urgency} | {_fmt_dollar(pnl)} |")
         lines.append("")
     else:
         lines.append("No exit events today.")
         lines.append("")
 
-    # Section 4: Live Broker Positions
+    # Section 4: Live Broker Positions (skip if moomoo unavailable, timeout 2s)
     lines.append("## Live Broker Positions")
     lines.append("")
+    live_positions = []
     try:
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
         from tradingbot.dataflows.moomoo_data import fetch_account_positions
-        live_positions = fetch_account_positions()
-    except Exception:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(fetch_account_positions)
+            live_positions = (future.result(timeout=2) or []) if future else []
+    except (Exception, FuturesTimeoutError):
         live_positions = []
 
     if live_positions:
@@ -568,13 +573,16 @@ def _write_daily_summary_html(
         f"<em>Generated {_html.escape(_now_et().strftime('%Y-%m-%d %H:%M:%S %Z'))}</em></p>"
     )
 
+    # Filter to real (non-dry-run) executions
+    real_entries = [e for e in entry_execs if not e.get("dry_run")]
+
     # KPIs
     html_parts.append("<div class='kpis'>")
     for label, val in [
         ("Scanned", n_scanned),
         ("Approved", n_approved),
         ("Rejected", n_rejected),
-        ("Executed", len(entry_execs)),
+        ("Executed", len(real_entries)),
         ("Open", len(open_positions)),
     ]:
         html_parts.append(f"<div class='kpi'><b>{val}</b><span>{_html.escape(label)}</span></div>")
@@ -586,12 +594,12 @@ def _write_daily_summary_html(
 
     # Executed Trades
     html_parts.append("<h2>✅ Executed Trades</h2>")
-    if entry_execs:
+    if real_entries:
         html_parts.append(
             "<table>"
             "<tr><th>Ticker</th><th>Direction</th><th>Structure</th><th>Contracts</th><th>Entry Price</th><th>Status</th></tr>"
         )
-        for exec_rec in entry_execs:
+        for exec_rec in real_entries:
             ticker = exec_rec.get("ticker", "?")
             direction = exec_rec.get("direction", "?")
             structure = exec_rec.get("structure", "?")
@@ -659,7 +667,7 @@ def _write_daily_summary_html(
             reason_str = "; ".join(f"{r} ({n})" for r, n in top)
             html_parts.append(
                 f"<div class='summary-text' style='color:#666;font-size:.95rem'>"
-                f"<strong>Why {n_rejected} were rejected:</strong> {reason_str}</div>"
+                f"<strong>Why {len(rejected_recs)} were rejected:</strong> {reason_str}</div>"
             )
 
     # Links to full reports

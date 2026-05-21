@@ -1,4 +1,4 @@
-"""Tests for oa2.learning.knowledge_base."""
+"""Tests for tradingbot.learning.knowledge_base."""
 
 from __future__ import annotations
 

@@ -75,7 +75,7 @@ def _derive_static_blacklist(kb: KnowledgeBase) -> tuple[list[str], dict[str, fl
 
     The blacklist UNIONS:
       - KB-driven: tickers meeting KB.is_blacklisted() criteria (n>=30, hit<43%, $win<45%)
-      - Code fallback: tickers in oa2.strategy.quality_gates._FALLBACK_BLACKLIST
+      - Code fallback: tickers in tradingbot.strategy.quality_gates._FALLBACK_BLACKLIST
         (safety net so a KB rebuild can never silently drop hard-earned bans)
 
     Quality scores combine KB multipliers (when n>=20) with the code fallback
