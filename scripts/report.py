@@ -27,6 +27,9 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import yfinance as yf
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 ET = ZoneInfo("America/New_York")
 
@@ -355,6 +358,13 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
     report_path = day_dir / "premarket.md"
     _write_report(report_path, "\n".join(lines))
 
+    try:
+        from scripts import telegram_notify
+        msg = f"📊 Premarket Report Generated\n{report_date}\n{len(scan_records)} scanned, {len([s for s in scan_records if s.get('approved')])} approved"
+        telegram_notify.send(msg)
+    except Exception:
+        pass
+
 
 # =============================================================================
 # POSTMARKET REPORT
@@ -508,6 +518,13 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
     day_dir = _get_day_reports_dir(report_date, reports_dir)
     report_path = day_dir / "postmarket.md"
     _write_report(report_path, "\n".join(lines))
+
+    try:
+        from scripts import telegram_notify
+        msg = f"📈 Postmarket Report Generated\n{report_date}\nExecuted: {len(executed_records)}, Exits: {len(exit_alert_records)}"
+        telegram_notify.send(msg)
+    except Exception:
+        pass
 
     _write_daily_summary_html(
         day_dir=day_dir,
