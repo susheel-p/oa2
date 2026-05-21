@@ -403,21 +403,24 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
     # Section 2: Executed Trades
     lines.append("## Executed Trades")
     lines.append("")
-    real_entries = [e for e in entry_execs if not e.get("dry_run")]
-    if real_entries:
+    if entry_execs:
         lines.append("| Time | Ticker | Direction | Structure | Contracts | Leg Status | Trigger |")
         lines.append("|------|--------|-----------|-----------|-----------|-----------|---------|")
-        for exec_rec in real_entries:
+        for exec_rec in entry_execs:
             ts = exec_rec.get("ts", "?")[:16]
             ticker = exec_rec.get("ticker", "?")
             direction = exec_rec.get("direction", "?")
             structure = exec_rec.get("structure", "?")
             contracts = exec_rec.get("contracts", 0)
             legs = exec_rec.get("legs", [])
-            leg_summary = ", ".join(
-                f"leg{l.get('leg')}={l.get('status', '?')}@{l.get('avg_fill_price', 0):.2f}"
-                for l in legs if not l.get("error")
-            ) or "error"
+            is_dry_run = exec_rec.get("dry_run", False)
+            if is_dry_run:
+                leg_summary = "DRY-RUN"
+            else:
+                leg_summary = ", ".join(
+                    f"leg{l.get('leg')}={l.get('status', '?')}@{l.get('avg_fill_price', 0):.2f}"
+                    for l in legs if not l.get("error")
+                ) or "error"
             trigger = exec_rec.get("trigger", "?")
             lines.append(f"| {ts} | {ticker} | {direction} | {structure} | {contracts} | {leg_summary} | {trigger} |")
         lines.append("")
@@ -573,16 +576,13 @@ def _write_daily_summary_html(
         f"<em>Generated {_html.escape(_now_et().strftime('%Y-%m-%d %H:%M:%S %Z'))}</em></p>"
     )
 
-    # Filter to real (non-dry-run) executions
-    real_entries = [e for e in entry_execs if not e.get("dry_run")]
-
     # KPIs
     html_parts.append("<div class='kpis'>")
     for label, val in [
         ("Scanned", n_scanned),
         ("Approved", n_approved),
         ("Rejected", n_rejected),
-        ("Executed", len(real_entries)),
+        ("Executed", len(entry_execs)),
         ("Open", len(open_positions)),
     ]:
         html_parts.append(f"<div class='kpi'><b>{val}</b><span>{_html.escape(label)}</span></div>")
@@ -594,22 +594,27 @@ def _write_daily_summary_html(
 
     # Executed Trades
     html_parts.append("<h2>✅ Executed Trades</h2>")
-    if real_entries:
+    if entry_execs:
         html_parts.append(
             "<table>"
             "<tr><th>Ticker</th><th>Direction</th><th>Structure</th><th>Contracts</th><th>Entry Price</th><th>Status</th></tr>"
         )
-        for exec_rec in real_entries:
+        for exec_rec in entry_execs:
             ticker = exec_rec.get("ticker", "?")
             direction = exec_rec.get("direction", "?")
             structure = exec_rec.get("structure", "?")
             contracts = exec_rec.get("contracts", 0)
             legs = exec_rec.get("legs", [])
-            avg_fill = next((l.get("avg_fill_price", 0) for l in legs if not l.get("error")), 0)
-            leg_status = ", ".join(
-                f"leg{l.get('leg')}={l.get('status', '?')}"
-                for l in legs if not l.get("error")
-            ) or "error"
+            is_dry_run = exec_rec.get("dry_run", False)
+            if is_dry_run:
+                avg_fill = 0
+                leg_status = "DRY-RUN"
+            else:
+                avg_fill = next((l.get("avg_fill_price", 0) for l in legs if not l.get("error")), 0)
+                leg_status = ", ".join(
+                    f"leg{l.get('leg')}={l.get('status', '?')}"
+                    for l in legs if not l.get("error")
+                ) or "error"
             html_parts.append(
                 f"<tr><td><strong>{_html.escape(ticker)}</strong></td><td>{_html.escape(direction)}</td>"
                 f"<td>{_html.escape(structure)}</td><td>{contracts}</td>"
