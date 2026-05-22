@@ -162,8 +162,8 @@ python scripts/telegram_notify.py "Test message from oa2"
 ### .env File (Already Configured)
 ```
 TRADINGBOT_HOME=C:\Users\pamed\Susheel\tradingbot-docker
-TELEGRAM_BOT_TOKEN=8809242046:AAF6EwAxrEN1uGlSeueJbm6WAIQd3DdhlCo
-TELEGRAM_CHAT_ID=382351447
+TELEGRAM_BOT_TOKEN=<your_bot_token_from_botfather>
+TELEGRAM_CHAT_ID=<your_chat_id>
 WATCHDOG_STALE_SECONDS=300      # Alert if no heartbeat for 5 min
 WATCHDOG_MAX_ALERTS=5           # Cap 5 alerts per recovery cycle
 WATCHDOG_INTERVAL_SECONDS=300   # Check every 5 min
