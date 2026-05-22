@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from tradingbot.core.clock import Clock, SystemClock
+from tradingbot.core.config import TRAILING_STOP_PCT
 
 
 @dataclass
@@ -81,6 +82,7 @@ class OpenPosition:
     max_loss_per_contract: float    # max loss per contract (positive number)
     stop_loss_pct: float = 1.00     # close when loss >= stop_loss_pct × max_loss
     profit_target_pct: float = 0.50 # close when gain >= profit_target_pct × max_profit
+    trailing_stop_pct: float = field(default_factory=lambda: TRAILING_STOP_PCT)  # close if P&L drops X% from peak
 
     # Greeks at entry (dollar terms)
     delta: float = 0.0
@@ -91,6 +93,7 @@ class OpenPosition:
     current_pnl: float = 0.0        # cumulative P&L in dollars (negative = loss)
     current_underlying_price: float = 0.0
     current_dte: int = 0
+    peak_pnl: float = 0.0           # highest P&L reached (high water mark for trailing stops)
     last_checked: float = field(default_factory=time.time)
 
     # Legs are optional; structures registered before the legs refactor (and
@@ -126,6 +129,20 @@ class OpenPosition:
         if self.max_loss <= 0:
             return 0.0
         return self.current_pnl / (-self.max_loss)
+
+    @property
+    def trailing_stop_threshold(self) -> float:
+        """Stop level: closes if P&L drops trailing_stop_pct from peak, floored at entry.
+
+        When no profit made: uses entry-based floor (-entry_premium * contracts * trailing_stop_pct).
+        When profitable: uses peak_pnl * (1 - trailing_stop_pct) but also bound by entry floor.
+        Returns the higher (less negative) of the two — fires when current_pnl <= this value.
+        """
+        entry_floor = -(self.entry_premium * self.contracts * self.trailing_stop_pct)
+        if self.peak_pnl <= 0:
+            return entry_floor
+        peak_trail = self.peak_pnl * (1 - self.trailing_stop_pct)
+        return max(peak_trail, entry_floor)
 
     @property
     def age_seconds(self) -> float:
@@ -177,10 +194,12 @@ class OpenPosition:
             "max_loss_per_contract": self.max_loss_per_contract,
             "stop_loss_pct": self.stop_loss_pct,
             "profit_target_pct": self.profit_target_pct,
+            "trailing_stop_pct": self.trailing_stop_pct,
             "delta": self.delta,
             "vega": self.vega,
             "theta": self.theta,
             "current_pnl": self.current_pnl,
+            "peak_pnl": self.peak_pnl,
             "current_underlying_price": self.current_underlying_price,
             "current_dte": self.current_dte,
             "legs": [
@@ -226,10 +245,12 @@ class OpenPosition:
             max_loss_per_contract=d["max_loss_per_contract"],
             stop_loss_pct=d.get("stop_loss_pct", 1.0),
             profit_target_pct=d.get("profit_target_pct", 0.5),
+            trailing_stop_pct=d.get("trailing_stop_pct", 0.10),
             delta=d.get("delta", 0.0),
             vega=d.get("vega", 0.0),
             theta=d.get("theta", 0.0),
             current_pnl=d.get("current_pnl", 0.0),
+            peak_pnl=d.get("peak_pnl", 0.0),
             current_underlying_price=d.get("current_underlying_price", 0.0),
             current_dte=d.get("current_dte", 0),
             legs=legs,
@@ -298,6 +319,8 @@ class PositionMonitor:
             return None
 
         pos.current_pnl = current_pnl
+        if current_pnl > pos.peak_pnl:
+            pos.peak_pnl = current_pnl
         pos.last_checked = self._clock.now()
         if current_underlying_price is not None:
             pos.current_underlying_price = current_underlying_price

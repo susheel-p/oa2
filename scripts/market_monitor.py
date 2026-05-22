@@ -48,6 +48,20 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from scripts import telegram_notify
 
+try:
+    from tradingbot.core.market_hours import (
+        is_market_day,
+        is_market_open,
+        time_until_market_open,
+    )
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from tradingbot.core.market_hours import (
+        is_market_day,
+        is_market_open,
+        time_until_market_open,
+    )
+
 ET = ZoneInfo("America/New_York")
 
 REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
@@ -111,19 +125,6 @@ def _alert_telegram(label: str, msg: str) -> None:
         _log(f"[TELEGRAM] Send error: {e}")
 
 
-def _is_market_day() -> bool:
-    """Return False on weekends."""
-    return _now_et().weekday() < 5
-
-
-def _is_market_open() -> bool:
-    """Return True if 9:30 AM - 4:00 PM ET on a market day."""
-    if not _is_market_day():
-        return False
-    now = _now_et()
-    market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-    market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-    return market_open <= now < market_close
 
 
 def _time_until_next_event(target_hour: int, target_minute: int) -> float:
@@ -341,7 +342,7 @@ class MarketMonitor:
 
         # Catch-up: if daemon started after a scheduled report/learning time on a market
         # day, run the missed process once instead of waiting until tomorrow.
-        if not self.once and _is_market_day():
+        if not self.once and is_market_day():
             now = _now_et()
             today = now.date()
             premarket_target = now.replace(hour=8, minute=30, second=0, microsecond=0)
@@ -376,7 +377,7 @@ class MarketMonitor:
             if (
                 now.hour == 8
                 and now.minute == 30
-                and _is_market_day()
+                and is_market_day(now)
             ):
                 self._run_premarket_report()
 
@@ -384,19 +385,19 @@ class MarketMonitor:
             if (
                 now.hour == 9
                 and now.minute == 35
-                and _is_market_day()
+                and is_market_day(now)
             ):
                 self._run_full_scan()
 
             # Run exit-only every minute during market hours
-            if _is_market_open():
+            if is_market_open(now):
                 self._run_exit_only()
 
             # Check for postmarket report at 4:15 PM
             if (
                 now.hour == 16
                 and now.minute == 15
-                and _is_market_day()
+                and is_market_day(now)
             ):
                 self._run_postmarket_report()
 
@@ -404,7 +405,7 @@ class MarketMonitor:
             if (
                 now.hour == 17
                 and now.minute == 0
-                and _is_market_day()
+                and is_market_day(now)
             ):
                 self._run_learning_loop()
 
@@ -422,10 +423,22 @@ class MarketMonitor:
             if self.once:
                 break
 
-            # Sleep until next minute boundary
-            sleep_time = 60 - now.second
-            if sleep_time <= 0:
-                sleep_time = 60
+            # Smart sleep: if market is closed, sleep longer until market opens
+            if not is_market_open(now) and not is_market_day(now):
+                # Market is closed today (weekend/holiday) — sleep until next market open
+                sleep_until_open = time_until_market_open(now)
+                _log(f"Market closed (holiday/weekend). Sleeping {sleep_until_open:.0f}s until next open.", self.log_file)
+                sleep_time = min(sleep_until_open, 3600)  # Cap at 1 hour to avoid missing recovery signals
+            elif not is_market_open(now):
+                # Market will open today — sleep until market opens
+                sleep_until_open = time_until_market_open(now)
+                _log(f"Market closed for now. Sleeping {sleep_until_open:.0f}s until market opens.", self.log_file)
+                sleep_time = min(sleep_until_open, 3600)
+            else:
+                # Market is open — sleep until next minute boundary
+                sleep_time = 60 - now.second
+                if sleep_time <= 0:
+                    sleep_time = 60
 
             try:
                 self.stop_event.wait(sleep_time)

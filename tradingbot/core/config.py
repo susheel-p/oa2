@@ -52,3 +52,6 @@ BROKER: str = os.getenv("BROKER", "moomoo").lower()
 
 # Log level
 LOG_LEVEL: str = os.getenv("OA2_LOG_LEVEL", "INFO").upper()
+
+# Exit engine: trailing stop configuration
+TRAILING_STOP_PCT: float = float(os.getenv("TRAILING_STOP_PCT", "0.10"))

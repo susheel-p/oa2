@@ -6,11 +6,12 @@ The first rule that fires wins — priority order is by urgency.
 
 Priority order:
     1. STOP_LOSS        — current loss >= stop threshold (immediate)
-    2. DTE_EMERGENCY    — short leg DTE < 2 (immediate, avoid assignment)
-    3. HARD_EOD_CUTOFF  — 3:55 PM ET for intraday positions (immediate)
-    4. PROFIT_TARGET    — gain >= 50% of max_profit for short premium (execute)
-    5. TIME_STOP        — position held > time_stop_days from entry (evaluate)
-    6. REGIME_FLIP      — current regime != entry regime and consensus flipped (evaluate)
+    2. TRAILING_STOP    — P&L drops trailing_stop_pct from peak, floored at entry (immediate)
+    3. DTE_EMERGENCY    — short leg DTE < 2 (immediate, avoid assignment)
+    4. HARD_EOD_CUTOFF  — 3:55 PM ET for intraday positions (immediate)
+    5. PROFIT_TARGET    — gain >= 50% of max_profit for short premium (execute)
+    6. TIME_STOP        — position held > time_stop_days from entry (evaluate)
+    7. REGIME_FLIP      — current regime != entry regime and consensus flipped (evaluate)
 
 Urgency levels:
     IMMEDIATE   — close NOW, market order if needed
@@ -33,6 +34,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from tradingbot.core.clock import Clock, SystemClock
+from tradingbot.core.config import TRAILING_STOP_PCT
 from tradingbot.execution.monitor import OpenPosition
 
 
@@ -40,6 +42,7 @@ ET = ZoneInfo("America/New_York")
 
 # Configurable thresholds
 _STOP_LOSS_PCT = 1.00           # close when loss >= 100% of max_loss
+_TRAILING_STOP_PCT = TRAILING_STOP_PCT  # close if P&L drops X% from peak (configured via TRAILING_STOP_PCT env var)
 _PROFIT_TARGET_PCT = 0.50       # close when gain >= 50% of max_profit (short premium)
 _DTE_EMERGENCY_THRESHOLD = 2    # close any short leg with DTE <= this
 _DEFAULT_TIME_STOP_DAYS = 21    # close long positions after this many days
@@ -49,6 +52,7 @@ _EOD_CUTOFF_MINUTE = 55         # 3:55 PM ET
 
 class ExitReason(Enum):
     STOP_LOSS = "stop_loss"
+    TRAILING_STOP = "trailing_stop"
     PROFIT_TARGET = "profit_target"
     DTE_EMERGENCY = "dte_emergency"
     TIME_STOP = "time_stop"
@@ -132,27 +136,32 @@ class ExitEngine:
         if decision.fired:
             return decision
 
-        # Rule 2: DTE emergency (avoid assignment on short legs)
+        # Rule 2: Trailing stop (dynamic stop that reacts to reversals from peak)
+        decision = self._check_trailing_stop(position)
+        if decision.fired:
+            return decision
+
+        # Rule 3: DTE emergency (avoid assignment on short legs)
         decision = self._check_dte_emergency(position)
         if decision.fired:
             return decision
 
-        # Rule 3: Hard EOD cutoff (intraday positions only)
+        # Rule 4: Hard EOD cutoff (intraday positions only)
         decision = self._check_hard_eod(position, context)
         if decision.fired:
             return decision
 
-        # Rule 4: Profit target
+        # Rule 5: Profit target
         decision = self._check_profit_target(position)
         if decision.fired:
             return decision
 
-        # Rule 5: Time stop
+        # Rule 6: Time stop
         decision = self._check_time_stop(position)
         if decision.fired:
             return decision
 
-        # Rule 6: Regime flip
+        # Rule 7: Regime flip
         decision = self._check_regime_flip(position, context)
         if decision.fired:
             return decision
@@ -204,6 +213,26 @@ class ExitEngine:
                     f"Stop loss hit: P&L {pos.current_pnl:+.2f} "
                     f"<= threshold {stop_threshold:+.2f} "
                     f"({self.stop_loss_pct*100:.0f}% of max_loss {pos.max_loss:.2f})"
+                ),
+                current_pnl=pos.current_pnl,
+                current_dte=pos.current_dte,
+            )
+        return self._no_exit(pos)
+
+    def _check_trailing_stop(self, pos: OpenPosition) -> ExitDecision:
+        """Rule 2: Trailing stop — close if P&L drops trailing_stop_pct from peak,
+        with floor at trailing_stop_pct loss from entry."""
+        threshold = pos.trailing_stop_threshold
+        if pos.current_pnl <= threshold:
+            return ExitDecision(
+                trade_id=pos.trade_id,
+                should_exit=True,
+                reason=ExitReason.TRAILING_STOP,
+                urgency=ExitUrgency.IMMEDIATE,
+                detail=(
+                    f"Trailing stop hit: P&L {pos.current_pnl:+.2f} "
+                    f"<= stop level {threshold:+.2f} "
+                    f"(peak {pos.peak_pnl:+.2f}, trail {pos.trailing_stop_pct*100:.0f}%)"
                 ),
                 current_pnl=pos.current_pnl,
                 current_dte=pos.current_dte,

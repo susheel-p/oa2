@@ -5,6 +5,8 @@ from enum import Enum
 from typing import Optional, List
 from pydantic import BaseModel, Field, ConfigDict
 
+from tradingbot.core.config import TRAILING_STOP_PCT
+
 
 # ============================================================================
 # Enums for structured choices
@@ -305,6 +307,7 @@ class OptionsProposal(BaseModel):
     profit_target: float = Field(..., description="Profit target as $ or %")
     stop_loss: float = Field(..., description="Stop loss as $ or %")
     time_stop_days: Optional[int] = Field(default=None, ge=1, description="Exit after N days if P&L between targets")
+    trailing_stop_pct: float = Field(default_factory=lambda: TRAILING_STOP_PCT, ge=0, le=1, description="Trailing stop: close if P&L drops X% from peak, floored at entry")
 
     # Risk
     max_loss_dollars: float = Field(..., ge=0, description="Max loss in $")
@@ -412,6 +415,7 @@ class OptionsDecision(BaseModel):
     # P&L targets
     target_profit_dollars: float = Field(..., description="Target profit in $")
     max_loss_dollars: float = Field(..., description="Max acceptable loss in $")
+    trailing_stop_pct: float = Field(default_factory=lambda: TRAILING_STOP_PCT, ge=0, le=1, description="Trailing stop: close if P&L drops X% from peak, floored at entry")
 
     # Trade ID for logging
     trade_id: Optional[str] = Field(default=None, description="Unique ID for this trade (generated on approval)")

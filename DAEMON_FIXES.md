@@ -204,6 +204,61 @@ WATCHDOG_HEALTH_INTERVAL=3600   # "All clear" every 1 hour (0=disabled)
 
 ---
 
+## May 22: Market Hours Optimization
+
+**Goal:** Daemon should not run during market closure (weekends/holidays), reducing unnecessary wakeups and resource usage.
+
+### Implementation
+
+**New Module:** `tradingbot/core/market_hours.py`
+- Uses pandas `USFederalHolidayCalendar` to compute market holidays dynamically (no hardcoding)
+- Provides functions for market status queries:
+  - `is_market_day(dt)` — excludes weekends + federal holidays
+  - `is_market_open(dt)` — True only 9:30 AM-4:00 PM ET on market days
+  - `time_until_market_open(dt)` — seconds to next market open
+  - `get_market_holidays(year)` — all US market holidays for a year
+
+**Updated:** `scripts/market_monitor.py`
+- Imports from new market_hours module
+- Smart sleep logic: when market is closed, sleeps until next market open (not just 60 seconds)
+- Logs market closure reason (weekend vs. holiday)
+- Caps sleep at 1 hour to allow recovery signal monitoring
+
+Benefits:
+- Reduces wakeups during market closure (weekends, holidays) from 1440/day to ~2-3
+- Holiday list computed fresh daily—no manual updates needed
+- Clear logging of market status transitions
+- Daemon still responsive during off-hours for manual intervention
+
+### Example Behavior
+
+**Friday 4:00 PM (market closes):**
+```
+[2026-05-22T16:00:00] Market closed for now. Sleeping 13h until market opens.
+```
+
+**Sunday evening (market closed tomorrow is Memorial Day):**
+```
+[2026-05-25T20:00:00] Market closed (holiday/weekend). Sleeping 13h until next open.
+```
+
+**Monday 9:00 AM (market opens in 30 min):**
+```
+[2026-05-26T09:00:00] Market closed for now. Sleeping 1800s until market opens.
+```
+
+### Testing
+
+```bash
+# Verify market hours functions work
+python -c "from tradingbot.core.market_hours import is_market_day, is_market_open, get_market_holidays; print('Market holidays 2026:', len(get_market_holidays(2026)))"
+
+# Test daemon with new logic
+python scripts/market_monitor.py --once
+```
+
+---
+
 ## Future Improvements
 
 1. **Process Monitoring** - Add system resource monitoring (CPU, memory) to detect hung processes
@@ -211,3 +266,4 @@ WATCHDOG_HEALTH_INTERVAL=3600   # "All clear" every 1 hour (0=disabled)
 3. **Timeout Escalation** - If FULL-SCAN near timeout, try to kill subprocess and restart
 4. **Multiple Alert Channels** - Add email/SMS in addition to Telegram for critical alerts
 5. **Alert Aggregation** - Batch multiple short alerts into single Telegram message to reduce spam
+6. **Extended Hours Support** - Add pre-market (4:00 AM) and after-hours (4:00 PM-8:00 PM) modes
