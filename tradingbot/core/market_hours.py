@@ -1,6 +1,13 @@
 """US market hours and holiday management.
 
-Computes market holidays dynamically from pandas calendar to avoid hardcoding.
+Computes NYSE/NASDAQ market holidays dynamically (not federal holidays).
+No hardcoded lists—holidays are calculated fresh for each year based on market rules.
+
+Market-specific holidays include:
+- Good Friday (not a federal holiday)
+- Day after Thanksgiving (not a federal holiday)
+- Excludes some federal holidays when market IS open (e.g., Veterans Day)
+
 Provides market open/close times and intelligent sleep calculations.
 """
 
@@ -12,8 +19,14 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 from pandas.tseries.holiday import (
-    USFederalHolidayCalendar,
     AbstractHolidayCalendar,
+    Holiday,
+    GoodFriday,
+    USMartinLutherKingJr,
+    USPresidentsDay,
+    USMemorialDay,
+    USLaborDay,
+    USThanksgivingDay,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -24,14 +37,53 @@ MARKET_CLOSE_HOUR = 16
 MARKET_CLOSE_MINUTE = 0
 
 
-@lru_cache(maxsize=1)
-def _get_holiday_calendar() -> AbstractHolidayCalendar:
-    """Get US Federal Holiday calendar (cached)."""
-    return USFederalHolidayCalendar()
+class NYSEHolidayCalendar(AbstractHolidayCalendar):
+    """NYSE/NASDAQ market holiday calendar (excludes federal holidays when market is open)."""
+
+    rules = [
+        Holiday("New Year's Day", month=1, day=1),
+        USMartinLutherKingJr,
+        USPresidentsDay,
+        GoodFriday,
+        USMemorialDay,
+        Holiday("Juneteenth", month=6, day=19),
+        Holiday("Independence Day", month=7, day=4),
+        USLaborDay,
+        USThanksgivingDay,
+        Holiday("Christmas", month=12, day=25),
+    ]
+
+    def __init__(self):
+        super().__init__(rules=self.rules)
 
 
+def _build_market_holidays(year: int) -> pd.DatetimeIndex:
+    """Build NYSE/NASDAQ holiday list for a year, including day after Thanksgiving (Black Friday)."""
+    cal = NYSEHolidayCalendar()
+    start = f"{year}-01-01"
+    end = f"{year}-12-31"
+    holidays = cal.holidays(start=start, end=end)
+
+    # Add Black Friday (day after Thanksgiving)
+    # Thanksgiving = 4th Thursday of November
+    nov_first = datetime.datetime(year, 11, 1)
+    days_until_thursday = (3 - nov_first.weekday()) % 7  # 3 = Thursday
+    first_thursday = nov_first + datetime.timedelta(days=days_until_thursday)
+    thanksgiving_day = first_thursday + datetime.timedelta(days=21)  # 4th Thursday
+    black_friday = thanksgiving_day + datetime.timedelta(days=1)
+
+    holidays = holidays.append(pd.DatetimeIndex([black_friday]))
+    holidays = holidays.sort_values().unique()
+
+    return holidays
+
+
+@lru_cache(maxsize=8)
 def get_market_holidays(year: int | None = None) -> pd.DatetimeIndex:
-    """Get all US market holidays for a given year.
+    """Get all NYSE/NASDAQ market holidays for a given year.
+
+    Market-specific, not federal holidays. Includes Good Friday, Black Friday.
+    Excludes federal holidays when market is open (e.g., Veterans Day).
 
     Args:
         year: Year to fetch holidays for. If None, uses current year.
@@ -42,10 +94,7 @@ def get_market_holidays(year: int | None = None) -> pd.DatetimeIndex:
     if year is None:
         year = datetime.datetime.now(ET).year
 
-    cal = _get_holiday_calendar()
-    start = f"{year}-01-01"
-    end = f"{year}-12-31"
-    return cal.holidays(start=start, end=end)
+    return _build_market_holidays(year)
 
 
 def is_market_holiday(dt: datetime.datetime | None = None) -> bool:

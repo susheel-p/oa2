@@ -211,12 +211,21 @@ WATCHDOG_HEALTH_INTERVAL=3600   # "All clear" every 1 hour (0=disabled)
 ### Implementation
 
 **New Module:** `tradingbot/core/market_hours.py`
-- Uses pandas `USFederalHolidayCalendar` to compute market holidays dynamically (no hardcoding)
+- **NYSE/NASDAQ market holidays** (not federal holidays—they differ!)
+  - Dynamically computed, no hardcoded list
+  - Calculated fresh for each year based on market rules
+  - Includes market-specific closures:
+    - **Good Friday** (not a federal holiday)
+    - **Black Friday** (day after Thanksgiving, not a federal holiday)
+    - **Thanksgiving Day** (federal + market)
+    - Standard federal holidays: New Year's, MLK Day, Presidents Day, Memorial Day, Juneteenth, Independence Day, Labor Day, Christmas
+  - Excludes federal holidays when market IS open (e.g., Veterans Day)
 - Provides functions for market status queries:
-  - `is_market_day(dt)` — excludes weekends + federal holidays
+  - `is_market_day(dt)` — excludes weekends + NYSE/NASDAQ market holidays
   - `is_market_open(dt)` — True only 9:30 AM-4:00 PM ET on market days
+  - `is_market_holiday(dt)` — True if date is a market holiday
   - `time_until_market_open(dt)` — seconds to next market open
-  - `get_market_holidays(year)` — all US market holidays for a year
+  - `get_market_holidays(year)` — all NYSE/NASDAQ market holidays for a year
 
 **Updated:** `scripts/market_monitor.py`
 - Imports from new market_hours module
