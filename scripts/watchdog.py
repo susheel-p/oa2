@@ -78,6 +78,8 @@ def _load_state() -> dict:
             "last_alert_time": None,
             "last_heartbeat_time": None,
             "last_health_check": None,
+            "last_8am_alert": None,
+            "last_noon_check": None,
             "was_stale": False,
         }
     try:
@@ -90,6 +92,8 @@ def _load_state() -> dict:
             "last_alert_time": None,
             "last_heartbeat_time": None,
             "last_health_check": None,
+            "last_8am_alert": None,
+            "last_noon_check": None,
             "was_stale": False,
         }
 
@@ -125,6 +129,96 @@ def _get_heartbeat_age() -> float | None:
         return None
 
 
+def _count_signals_generated() -> int:
+    """Count signals generated from today's daemon log."""
+    daemon_log = TRADINGBOT_HOME / "logs" / "daemon.log"
+    if not daemon_log.exists():
+        return 0
+    try:
+        with open(daemon_log) as f:
+            content = f.read()
+            return content.count("signal") + content.count("Signal") + content.count("SIGNAL")
+    except Exception:
+        return 0
+
+
+def _check_for_errors() -> int:
+    """Count errors in today's daemon log."""
+    daemon_log = TRADINGBOT_HOME / "logs" / "daemon.log"
+    if not daemon_log.exists():
+        return 0
+    try:
+        with open(daemon_log) as f:
+            content = f.read()
+            return content.count("ERROR") + content.count("Error") + content.count("error")
+    except Exception:
+        return 0
+
+
+def _should_send_8am_alert() -> bool:
+    """Check if we should send 8am health report (once per day)."""
+    state = _load_state()
+    last_8am = state.get("last_8am_alert")
+    now = datetime.now()
+
+    # Check if we're near 8am (within 1 hour) and haven't sent yet today
+    if now.hour == 8:
+        if last_8am is None or not last_8am.startswith(now.strftime("%Y-%m-%d")):
+            return True
+    return False
+
+
+def _should_send_noon_check() -> bool:
+    """Check if we should send noon issue check (once per day)."""
+    state = _load_state()
+    last_noon = state.get("last_noon_check")
+    now = datetime.now()
+
+    # Check if we're near noon (hour 12, within 1 hour) and haven't sent yet today
+    if now.hour == 12:
+        if last_noon is None or not last_noon.startswith(now.strftime("%Y-%m-%d")):
+            return True
+    return False
+
+
+def _send_8am_alert(state: dict) -> None:
+    """Send 8am system health report."""
+    age = _get_heartbeat_age()
+    daemon_status = "running" if age is not None and age <= STALE_SECONDS else "stale"
+    signals = _count_signals_generated()
+
+    if telegram_notify.notify_system_health(
+        daemon_status=daemon_status,
+        signals_generated=signals,
+        heartbeat_age_seconds=int(age) if age is not None else None,
+    ):
+        state["last_8am_alert"] = datetime.now().isoformat()
+        _log("[OK] 8am health alert sent")
+    else:
+        _log("[WARN] 8am health alert failed to send")
+
+
+def _send_noon_check(state: dict) -> None:
+    """Send noon system issue check."""
+    age = _get_heartbeat_age()
+    is_stale = age is None or age > STALE_SECONDS
+    error_count = _check_for_errors()
+    last_activity = datetime.fromtimestamp(time.time() - (age or 0)).isoformat() if age else None
+
+    if telegram_notify.notify_system_issues(
+        is_stale=is_stale,
+        error_count=error_count,
+        last_activity=last_activity,
+    ):
+        state["last_noon_check"] = datetime.now().isoformat()
+        if not is_stale and error_count == 0:
+            _log("[OK] Noon check: all clear")
+        else:
+            _log("[OK] Noon alert sent")
+    else:
+        _log("[WARN] Noon check failed to send")
+
+
 def check_daemon() -> bool:
     """
     Check daemon liveness. Send alerts if stale, recovery if it comes back.
@@ -133,6 +227,14 @@ def check_daemon() -> bool:
     state = _load_state()
     age = _get_heartbeat_age()
     now = time.time()
+
+    # Check for 8am health alert
+    if _should_send_8am_alert():
+        _send_8am_alert(state)
+
+    # Check for noon issue check
+    if _should_send_noon_check():
+        _send_noon_check(state)
 
     # Write watchdog's own heartbeat
     _write_watchdog_heartbeat()
@@ -145,7 +247,7 @@ def check_daemon() -> bool:
         # Send recovery notification if daemon just came back
         if was_stale and alerts_sent > 0:
             recovery_msg = (
-                f"[RECOVERED] oa2 daemon is healthy again\n"
+                f"[RECOVERED] Daemon is healthy again\n"
                 f"Heartbeat age: {age:.0f}s\n"
                 f"Sent {alerts_sent} alerts before recovery"
             )
@@ -158,7 +260,7 @@ def check_daemon() -> bool:
         last_health = state.get("last_health_check")
         if HEALTH_INTERVAL > 0 and (last_health is None or now - last_health >= HEALTH_INTERVAL):
             health_msg = (
-                "[HEALTHY] oa2 daemon operating normally\n"
+                "✅ Daemon operating normally\n"
                 f"Heartbeat age: {age:.0f}s\n"
                 f"Watchdog: {LOOP_INTERVAL}s interval"
             )
@@ -168,12 +270,14 @@ def check_daemon() -> bool:
             else:
                 _log(f"[WARN] Health confirmation failed to send")
 
-        # Reset stale state
+        # Reset stale state, preserve 8am/noon alert times
         state = {
             "alerts_sent": 0,
             "last_alert_time": None,
             "last_heartbeat_time": now,
             "last_health_check": state.get("last_health_check"),
+            "last_8am_alert": state.get("last_8am_alert"),
+            "last_noon_check": state.get("last_noon_check"),
             "was_stale": False,
         }
         _save_state(state)
@@ -192,14 +296,14 @@ def check_daemon() -> bool:
     # Compose alert message with clear severity indicators
     if age is None:
         msg = (
-            "🚨 ALERT: oa2 daemon not started yet\n"
+            "🚨 ALERT: Daemon not started yet\n"
             f"Heartbeat file missing: {HEARTBEAT_FILE}\n\n"
             f"Action: Start the daemon now\n"
             f"python scripts/market_monitor.py"
         )
     else:
         msg = (
-            f"🚨 ALERT: oa2 daemon is STALE (no heartbeat for {age:.0f}s)\n"
+            f"🚨 ALERT: Daemon is STALE (no heartbeat for {age:.0f}s)\n"
             f"Expected update every 60s during market hours\n"
             f"Stale threshold: {STALE_SECONDS}s\n\n"
             f"Immediate Actions:\n"
@@ -216,6 +320,9 @@ def check_daemon() -> bool:
         state["last_alert_time"] = datetime.now().isoformat()
         state["last_heartbeat_time"] = time.time() if age is not None else None
         state["was_stale"] = True
+        # Preserve 8am and noon alert times
+        state.setdefault("last_8am_alert", state.get("last_8am_alert"))
+        state.setdefault("last_noon_check", state.get("last_noon_check"))
         _save_state(state)
     else:
         _log(f"[WARN] Telegram send failed (alert not counted); daemon is stale (age {age}s if exists)")

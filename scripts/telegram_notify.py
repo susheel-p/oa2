@@ -82,7 +82,7 @@ def format_trade(
     expiry = pick.get("expiry", "?")
 
     lines = [
-        f"oa2 APPROVED -- {ticker} {direction}",
+        f"Trade approved: {ticker} {direction}",
     ]
 
     # Build structure line with safe formatting
@@ -111,16 +111,57 @@ def notify_trade(ticker: str, result: dict, fills: list[dict] | None = None) -> 
 
 def notify_summary(summary: dict) -> bool:
     text = (
-        "oa2 run complete\n"
+        "Trading run complete\n"
         f"Approved: {summary.get('approved_count', 0)}\n"
         f"Rejected: {summary.get('rejected_count', 0)}\n"
-        f"Errors:   {summary.get('error_count', 0)}\n"
+        f"Errors: {summary.get('error_count', 0)}\n"
         f"Exit alerts: {summary.get('exit_alert_count', 0)}"
     )
     return send(text)
 
 
+def notify_system_health(
+    daemon_status: str,
+    signals_generated: int,
+    heartbeat_age_seconds: int | None = None,
+) -> bool:
+    """Send 8am system health report."""
+    status_emoji = "✅" if daemon_status == "running" else "⚠️"
+    text = f"""{status_emoji} System Health Report (8am)
+
+Daemon: {daemon_status}
+Signals generated: {signals_generated}"""
+
+    if heartbeat_age_seconds is not None:
+        text += f"\nHeartbeat age: {heartbeat_age_seconds}s"
+
+    return send(text)
+
+
+def notify_system_issues(
+    is_stale: bool,
+    error_count: int,
+    last_activity: str | None = None,
+) -> bool:
+    """Send noon watchdog alert if there are system issues."""
+    if not is_stale and error_count == 0:
+        return True  # No issues, don't send alert
+
+    alert_lines = ["🚨 System Issues Detected (Noon Check)"]
+
+    if is_stale:
+        alert_lines.append("❌ Daemon is stale - not responding")
+
+    if error_count > 0:
+        alert_lines.append(f"⚠️ {error_count} error(s) detected")
+
+    if last_activity:
+        alert_lines.append(f"Last activity: {last_activity}")
+
+    return send("\n".join(alert_lines))
+
+
 if __name__ == "__main__":
     import sys
-    msg = " ".join(sys.argv[1:]) or "oa2 telegram_notify test ping"
+    msg = " ".join(sys.argv[1:]) or "Test message from trading system"
     print("sent" if send(msg) else "FAILED (check TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)")
