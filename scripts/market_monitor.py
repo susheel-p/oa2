@@ -82,17 +82,11 @@ def _get_daemon_log_path() -> Path:
 
 
 def _log(msg: str, log_file: Path | None = None) -> None:
-    """Log message to console and optionally to daemon log file."""
+    """Log message to console. supervisord captures stdout to daemon.log automatically."""
     ts = _now_et().strftime("%Y-%m-%dT%H:%M:%S%z")
     output = f"[{ts}] {msg}"
     print(output, flush=True)
-
-    if log_file:
-        try:
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(output + "\n")
-        except Exception:
-            pass  # Silently fail if log file unavailable
+    # Note: log_file parameter unused since supervisord redirects stdout to daemon.log
 
 
 def _update_heartbeat(heartbeat_file: Path) -> bool:

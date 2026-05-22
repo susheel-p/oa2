@@ -593,13 +593,20 @@ def main() -> None:
             n_exits = len(result.get("exit_alerts", []))
 
             if status == "sized_approved":
+                struct_pick = result.get("structure_pick") or {}
+                # Validate that structure has actual data before submitting
+                if not struct_pick.get("long_strike"):
+                    _log(f"    [SKIP] APPROVED but no structure found (no_viable_structure)")
+                    results.append(result)
+                    continue
+
                 _log(f"    [OK] APPROVED -- {contracts} contract(s)")
                 fills: list[dict] = []
                 if not args.dry_run and os.getenv("OA2_SUBMIT_ORDERS", "1") != "0":
                     fills = _submit_to_broker(
                         ticker=ticker,
                         decision=result.get("decision") or {},
-                        structure_pick=result.get("structure_pick") or {},
+                        structure_pick=struct_pick,
                     )
                     result["broker_fills"] = fills
                     for f in fills:

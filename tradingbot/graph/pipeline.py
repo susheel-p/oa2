@@ -359,7 +359,17 @@ def run(
     # ------------------------------------------------------------------
     # L6 — sizing engine (Kelly + book limits + CVaR)
     # ------------------------------------------------------------------
-    if feature_flags.SIZING_ENGINE_ENABLED and ctx.consensus is not None:
+    # Guard: reject if structure picking failed (no viable option structures found)
+    structure_pick_status = ctx.attribution.get("structure_pick", {}).get("status")
+    if structure_pick_status == "no_viable_structure":
+        ctx.sizing = {
+            "approved": False,
+            "reject_gate": "structure",
+            "reject_reason": "No viable option structure found for current market conditions",
+            "contracts": 0,
+        }
+        logger.log_sizing("REJECTED", "structure gate", {"reason": "No viable option structure"})
+    elif feature_flags.SIZING_ENGINE_ENABLED and ctx.consensus is not None:
         logger.log_stage("L6", "Running sizing gates (Kelly → Greeks → Scenario → MC CVaR)")
         ctx.sizing = _run_sizing(ctx, book, account_size)
         ctx.attribution["sizing"] = ctx.sizing
