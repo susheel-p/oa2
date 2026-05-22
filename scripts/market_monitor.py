@@ -34,6 +34,14 @@ import traceback
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
+from scripts import telegram_notify
+
 ET = ZoneInfo("America/New_York")
 
 REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
@@ -79,6 +87,28 @@ def _log(msg: str, log_file: Path | None = None) -> None:
                 f.write(output + "\n")
         except Exception:
             pass  # Silently fail if log file unavailable
+
+
+def _update_heartbeat(heartbeat_file: Path) -> bool:
+    """Update heartbeat file. Returns True on success."""
+    try:
+        heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
+        heartbeat_file.write_text(str(time.time()), encoding="utf-8")
+        return True
+    except Exception as e:
+        _log(f"Warning: heartbeat update failed: {e}")
+        return False
+
+
+def _alert_telegram(label: str, msg: str) -> None:
+    """Send alert to Telegram. Logs but doesn't block on failure."""
+    try:
+        if telegram_notify.send(f"[{label}] {msg}"):
+            _log(f"[TELEGRAM] Alert sent: {label}")
+        else:
+            _log(f"[TELEGRAM] Send failed (credentials missing?): {label}")
+    except Exception as e:
+        _log(f"[TELEGRAM] Send error: {e}")
 
 
 def _is_market_day() -> bool:
@@ -128,7 +158,7 @@ def _tail(text: str | None, n_chars: int = 2000) -> str:
 
 
 def _run_command(cmd: list[str], label: str, log_file: Path | None = None) -> bool:
-    """Run a shell command and log the result."""
+    """Run a shell command and log the result. Send Telegram alert on critical failures."""
     timeout_s = _TIMEOUTS.get(label, 300)
     t_start = time.monotonic()
     _log(f"[{label}] Starting (timeout {timeout_s}s) cmd={cmd}", log_file)
@@ -141,17 +171,26 @@ def _run_command(cmd: list[str], label: str, log_file: Path | None = None) -> bo
         _log(f"[{label}] FAILED exit={result.returncode} in {elapsed:.1f}s", log_file)
         _log(f"[{label}] stdout tail:\n{_tail(result.stdout)}", log_file)
         _log(f"[{label}] stderr tail:\n{_tail(result.stderr)}", log_file)
+        # Alert on critical operation failures
+        if label in ("FULL-SCAN", "POSTMARKET-REPORT"):
+            _alert_telegram(label, f"Operation failed (exit {result.returncode})\nCheck logs/daemon.log")
         return False
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - t_start
         _log(f"[{label}] TIMEOUT after {elapsed:.1f}s (limit {timeout_s}s)", log_file)
         _log(f"[{label}] stdout tail:\n{_tail(exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout)}", log_file)
         _log(f"[{label}] stderr tail:\n{_tail(exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr)}", log_file)
+        # Alert on critical timeouts
+        if label in ("FULL-SCAN", "POSTMARKET-REPORT"):
+            _alert_telegram(label, f"Operation TIMEOUT after {elapsed:.0f}s (limit {timeout_s}s)\nDaemon may be hung or resource-constrained")
         return False
     except Exception as exc:
         elapsed = time.monotonic() - t_start
         _log(f"[{label}] ERROR after {elapsed:.1f}s: {exc!r}", log_file)
         _log(f"[{label}] traceback:\n{traceback.format_exc()}", log_file)
+        # Alert on critical errors
+        if label in ("FULL-SCAN", "POSTMARKET-REPORT"):
+            _alert_telegram(label, f"Operation ERROR after {elapsed:.0f}s: {exc!r}")
         return False
 
 
@@ -378,10 +417,7 @@ class MarketMonitor:
                 self._run_weekly_analysis()
 
             # Write heartbeat for watchdog monitoring (before checking self.once)
-            try:
-                heartbeat_file.write_text(str(time.time()))
-            except Exception:
-                pass  # Silently fail if heartbeat write unavailable
+            _update_heartbeat(heartbeat_file)
 
             if self.once:
                 break
