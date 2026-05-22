@@ -145,13 +145,13 @@ class MoomooBroker:
     the session expired.
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 11111):
+    def __init__(self, host: str | None = None, port: int | None = None):
         if not MOOMOO_AVAILABLE:
             raise ImportError("moomoo SDK not installed. Run: pip install moomoo-api")
         _init_status_map()
 
-        self._host = host
-        self._port = port
+        self._host = host or os.getenv("MOOMOO_OPEND_HOST", "127.0.0.1")
+        self._port = port or int(os.getenv("MOOMOO_OPEND_PORT", 11111))
         self._trd_ctx: Any = None
         self._lock = threading.Lock()
         self._cid_to_oid: dict[str, str] = {}

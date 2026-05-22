@@ -68,9 +68,13 @@ def _get_quote_context():
         if not MOOMOO_AVAILABLE:
             raise ImportError("moomoo SDK not installed. Run: pip install moomoo-api")
         try:
-            _quote_ctx = ft.OpenQuoteContext(host="127.0.0.1", port=11111)
+            host = os.getenv("MOOMOO_OPEND_HOST", "127.0.0.1")
+            port = int(os.getenv("MOOMOO_OPEND_PORT", 11111))
+            _quote_ctx = ft.OpenQuoteContext(host=host, port=port)
         except Exception as e:
-            raise Exception(f"Failed to connect to OpenD server at 127.0.0.1:11111. Ensure moomoo app is running and OpenD is enabled. Error: {e}")
+            host = os.getenv("MOOMOO_OPEND_HOST", "127.0.0.1")
+            port = os.getenv("MOOMOO_OPEND_PORT", 11111)
+            raise Exception(f"Failed to connect to OpenD server at {host}:{port}. Ensure moomoo app is running and OpenD is enabled. Error: {e}")
         import atexit
         atexit.register(close_quote_context)
     return _quote_ctx

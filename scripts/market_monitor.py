@@ -40,7 +40,13 @@ try:
 except Exception:
     pass
 
-from scripts import telegram_notify
+try:
+    from scripts import telegram_notify
+except ImportError:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from scripts import telegram_notify
 
 ET = ZoneInfo("America/New_York")
 

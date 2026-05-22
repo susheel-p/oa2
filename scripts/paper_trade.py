@@ -123,8 +123,11 @@ _BROKER = None  # lazy singleton
 def _broker():
     global _BROKER
     if _BROKER is None:
+        import os
         from tradingbot.execution.moomoo_broker import MoomooBroker
-        _BROKER = MoomooBroker()
+        host = os.getenv("MOOMOO_OPEND_HOST", "127.0.0.1")
+        port = int(os.getenv("MOOMOO_OPEND_PORT", 11111))
+        _BROKER = MoomooBroker(host=host, port=port)
     return _BROKER
 
 
