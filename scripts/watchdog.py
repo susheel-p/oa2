@@ -189,19 +189,23 @@ def check_daemon() -> bool:
         _save_state(state)
         return False
 
-    # Compose alert message
+    # Compose alert message with clear severity indicators
     if age is None:
         msg = (
-            "[ALERT] oa2 daemon not started yet\n"
-            f"Heartbeat file missing: {HEARTBEAT_FILE}\n"
-            f"Start daemon: python scripts/market_monitor.py"
+            "🚨 ALERT: oa2 daemon not started yet\n"
+            f"Heartbeat file missing: {HEARTBEAT_FILE}\n\n"
+            f"Action: Start the daemon now\n"
+            f"python scripts/market_monitor.py"
         )
     else:
         msg = (
-            f"[ALERT] oa2 daemon stale (no update for {age:.0f}s)\n"
+            f"🚨 ALERT: oa2 daemon is STALE (no heartbeat for {age:.0f}s)\n"
             f"Expected update every 60s during market hours\n"
-            f"Check: tail -f logs/daemon.log\n"
-            f"Restart: python scripts/market_monitor.py"
+            f"Stale threshold: {STALE_SECONDS}s\n\n"
+            f"Immediate Actions:\n"
+            f"1. Check logs: tail -f logs/daemon.log\n"
+            f"2. Restart: python scripts/market_monitor.py\n"
+            f"3. Verify: no duplicate daemon instances running"
         )
 
     # Send alert — only increment counter if send succeeds
