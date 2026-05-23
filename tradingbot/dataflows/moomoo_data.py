@@ -56,6 +56,102 @@ def _creds() -> tuple[str, str, str]:
     return username, password, account_id
 
 
+def _compute_expiry_dates(as_of: datetime | None = None) -> list[str]:
+    """Compute a list of 5 option expiration dates for flow analysis.
+
+    Returns expirations representing: front-week, near-term, mid-term, longer.
+    Dates are ISO format strings (YYYY-MM-DD).
+
+    Args:
+        as_of: Compute from this date. Defaults to today.
+
+    Returns:
+        List of 5 ISO date strings, sorted ascending.
+    """
+    base = as_of or datetime.now()
+    expirations = []
+
+    # 1. Next Friday (front-week / weekly)
+    days_ahead = 4 - base.weekday()
+    if days_ahead <= 0:
+        days_ahead += 7
+    next_fri = base + timedelta(days=days_ahead)
+    expirations.append(next_fri.strftime("%Y-%m-%d"))
+
+    # 2. Friday after next (weekly)
+    two_fri = next_fri + timedelta(days=7)
+    expirations.append(two_fri.strftime("%Y-%m-%d"))
+
+    # 3. Third Friday (monthly / near-term monthly)
+    three_fri = next_fri + timedelta(days=14)
+    expirations.append(three_fri.strftime("%Y-%m-%d"))
+
+    # 4. 6-week (mid-term)
+    six_week = base + timedelta(days=42)
+    expirations.append(six_week.strftime("%Y-%m-%d"))
+
+    # 5. 10-week (longer-dated)
+    ten_week = base + timedelta(days=70)
+    expirations.append(ten_week.strftime("%Y-%m-%d"))
+
+    return sorted(expirations)
+
+
+def _recommend_expiry(chains_by_expiry: Dict[str, Dict[str, Any]]) -> str | None:
+    """Recommend which expiration to use based on options flow analysis.
+
+    Uses classify_expiry_flow() to find the dominant DTE bucket and maps it
+    to the appropriate expiration date.
+
+    Strategy:
+      - front_week dominant → use nearest expiry
+      - near_term dominant → use 2nd nearest expiry
+      - mid_term dominant → use 3rd nearest expiry
+      - longer dominant → use furthest expiry
+
+    Args:
+        chains_by_expiry: {expiry_str: {"calls": [...], "puts": [...]}}
+
+    Returns:
+        ISO date string of recommended expiration, or None if empty.
+    """
+    from tradingbot.dataflows.expiry_flow import classify_expiry_flow, ExpiryBucket
+
+    if not chains_by_expiry:
+        # Fallback: return next Friday
+        base = datetime.now()
+        days_ahead = 4 - base.weekday()
+        if days_ahead <= 0:
+            days_ahead += 7
+        return (base + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+    # Analyze flow across all expirations
+    flow_profile = classify_expiry_flow(chains_by_expiry)
+
+    # Map dominant bucket to expiration index
+    dominant = flow_profile.dominant_bucket
+    candidate_expiries = sorted(chains_by_expiry.keys())
+
+    if dominant == ExpiryBucket.FRONT_WEEK.value:
+        if len(candidate_expiries) >= 1:
+            return candidate_expiries[0]
+    elif dominant == ExpiryBucket.NEAR_TERM.value:
+        if len(candidate_expiries) >= 2:
+            return candidate_expiries[1]
+    elif dominant == ExpiryBucket.MID_TERM.value:
+        if len(candidate_expiries) >= 3:
+            return candidate_expiries[2]
+    elif dominant == ExpiryBucket.LONGER.value:
+        if len(candidate_expiries) >= 4:
+            return candidate_expiries[-1]
+
+    # Fallback: return nearest available expiry
+    if candidate_expiries:
+        return candidate_expiries[0]
+
+    return None
+
+
 # ── Quote Context (market data) ────────────────────────────────────────────
 
 _quote_ctx = None
@@ -511,8 +607,15 @@ def calculate_iv_rank(ticker: str, days_back: int = 252) -> float:
 
 # ── Options Flow Analysis (new) ───────────────────────────────────────────
 
-def analyze_options_flow(chain: Dict[str, Any]) -> Dict[str, Any]:
+def analyze_options_flow(chains_by_expiry_or_single: Dict[str, Any]) -> Dict[str, Any]:
     """Analyze options volume and Greeks for flow signals.
+
+    Accepts both single chain dict and multi-expiry dict for backwards compatibility.
+
+    Args:
+        chains_by_expiry_or_single:
+            - If has keys 'calls'/'puts': single chain (backwards compat)
+            - If has date keys (e.g., '2026-06-20'): multi-expiry dict
 
     Returns:
         {
@@ -526,15 +629,28 @@ def analyze_options_flow(chain: Dict[str, Any]) -> Dict[str, Any]:
             'data_quality': 'real' | 'partial' | 'absent'
         }
     """
-    calls = chain.get('calls', [])
-    puts = chain.get('puts', [])
+    input_dict = chains_by_expiry_or_single
+    all_calls = []
+    all_puts = []
 
-    if not calls or not puts:
+    # Detect if single chain or multi-expiry
+    if 'calls' in input_dict or 'puts' in input_dict:
+        # Single chain (backwards compatible path)
+        all_calls = input_dict.get('calls', [])
+        all_puts = input_dict.get('puts', [])
+    else:
+        # Multi-expiry: aggregate across all expirations
+        for expiry_str, chain in input_dict.items():
+            if isinstance(chain, dict):
+                all_calls.extend(chain.get('calls', []))
+                all_puts.extend(chain.get('puts', []))
+
+    if not all_calls or not all_puts:
         return {'data_quality': 'absent'}
 
     # PCR from volume
-    total_call_vol = sum(c.get('volume', 0) for c in calls)
-    total_put_vol = sum(p.get('volume', 0) for p in puts)
+    total_call_vol = sum(c.get('volume', 0) for c in all_calls)
+    total_put_vol = sum(p.get('volume', 0) for p in all_puts)
 
     if total_call_vol == 0 and total_put_vol == 0:
         return {'data_quality': 'absent'}
@@ -542,8 +658,8 @@ def analyze_options_flow(chain: Dict[str, Any]) -> Dict[str, Any]:
     pcr = total_put_vol / total_call_vol if total_call_vol > 0 else 0.0
 
     # Volume concentration (top 3 strikes)
-    top_calls = sorted(calls, key=lambda x: x.get('volume', 0), reverse=True)[:3]
-    top_puts = sorted(puts, key=lambda x: x.get('volume', 0), reverse=True)[:3]
+    top_calls = sorted(all_calls, key=lambda x: x.get('volume', 0), reverse=True)[:3]
+    top_puts = sorted(all_puts, key=lambda x: x.get('volume', 0), reverse=True)[:3]
 
     call_top_vol = sum(c.get('volume', 0) for c in top_calls)
     put_top_vol = sum(p.get('volume', 0) for p in top_puts)
@@ -552,14 +668,14 @@ def analyze_options_flow(chain: Dict[str, Any]) -> Dict[str, Any]:
     put_concentration = (put_top_vol / total_put_vol * 100) if total_put_vol > 0 else 0
 
     # Aggressive buys (volume >> ask_size, typical of sweeps)
-    agg_calls = sum(1 for c in calls
+    agg_calls = sum(1 for c in all_calls
                     if c.get('volume', 0) > 5 and c.get('ask_size', 0) < c.get('volume', 0) / 3)
-    agg_puts = sum(1 for p in puts
+    agg_puts = sum(1 for p in all_puts
                    if p.get('volume', 0) > 5 and p.get('ask_size', 0) < p.get('volume', 0) / 3)
 
     # Gamma concentration (top 3)
-    call_gammas = [abs(c.get('gamma', 0)) for c in calls]
-    put_gammas = [abs(p.get('gamma', 0)) for p in puts]
+    call_gammas = [abs(c.get('gamma', 0)) for c in all_calls]
+    put_gammas = [abs(p.get('gamma', 0)) for p in all_puts]
 
     total_call_gamma = sum(call_gammas)
     total_put_gamma = sum(put_gammas)
@@ -643,33 +759,43 @@ def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
         # Get latest candle data
         latest = technicals.iloc[-1].to_dict() if not technicals.empty else {}
 
-        # Options chain (front month)
-        today = datetime.now()
-        # Find next Friday (standard options expiration)
-        days_ahead = 4 - today.weekday()  # Friday is 4
-        if days_ahead <= 0:
-            days_ahead += 7
-        next_friday = today + timedelta(days=days_ahead)
-        exp_date = next_friday.strftime("%Y-%m-%d")
+        # Fetch multiple option expirations for flow analysis
+        expiries = _compute_expiry_dates()
+        chains_by_expiry = {}
+        for exp in expiries:
+            try:
+                chain = fetch_options_chain(ticker, exp)
+                if chain.get("calls") or chain.get("puts"):
+                    chains_by_expiry[exp] = chain
+            except Exception as e:
+                warnings.warn(f"Failed to fetch {ticker} chain for {exp}: {e}")
 
-        chain = fetch_options_chain(ticker, exp_date)
-        if isinstance(chain, dict):
-            chain["expiry"] = exp_date
+        # For backwards compatibility: use first available chain as default
+        default_chain = None
+        if chains_by_expiry:
+            first_exp = min(chains_by_expiry.keys())
+            default_chain = chains_by_expiry[first_exp]
+            default_chain["expiry"] = first_exp
 
         # IV rank (with validation to catch 0-1 scale errors)
         iv_rank = calculate_iv_rank(ticker)
         iv_rank = validate_and_normalize_iv_rank(iv_rank, context_source="moomoo", ticker=ticker)
 
-        # NEW: Flow analysis for flow debater
-        flow_analysis = analyze_options_flow(chain)
+        # Flow analysis across all expirations
+        flow_analysis = analyze_options_flow(chains_by_expiry) if chains_by_expiry else {"data_quality": "absent"}
         depth_analysis = analyze_market_depth(ticker)
+
+        # Recommend best expiration based on flow
+        recommended_expiry = _recommend_expiry(chains_by_expiry) if chains_by_expiry else None
 
         return {
             "ticker": ticker,
             "quote": quote,
             "latest_candle": latest,
             "bars": technicals,
-            "options_chain": chain,
+            "chains_by_expiry": chains_by_expiry,
+            "recommended_expiry": recommended_expiry,
+            "options_chain": default_chain,
             "iv_rank": iv_rank,
             "flow_analysis": flow_analysis,
             "depth_analysis": depth_analysis,

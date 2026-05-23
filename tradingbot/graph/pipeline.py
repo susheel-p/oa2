@@ -149,6 +149,14 @@ def run(
             logger.log_warning("L0 fetch failed", str(e))
             ctx.market_data = {"ticker": ticker, "stub": True, "fetch_error": str(e)}
 
+    # Extract recommended expiration from snapshot
+    recommended_expiry = ctx.market_data.get("recommended_expiry")
+    if recommended_expiry:
+        ctx.market_data["_recommended_expiry"] = recommended_expiry
+        logger.log_detail("Expiry recommendation", {"recommended": recommended_expiry})
+    else:
+        logger.log_detail("No expiry recommendation available", {})
+
     # ------------------------------------------------------------------
     # L0b — fetch flow data for flow debater (new)
     # ------------------------------------------------------------------
@@ -311,7 +319,20 @@ def run(
     if ctx.consensus is not None and ctx.consensus.direction.value in ("BULLISH", "BEARISH"):
         try:
             from tradingbot.strategy import pick_structure
-            chain = ctx.market_data.get("_options_chain")
+
+            # Get chain for recommended expiry, fall back to default chain
+            recommended_expiry = ctx.market_data.get("_recommended_expiry")
+            chains_by_expiry = ctx.market_data.get("chains_by_expiry", {})
+
+            if recommended_expiry and recommended_expiry in chains_by_expiry:
+                chain = chains_by_expiry[recommended_expiry]
+                logger.log_detail("Using recommended expiry for structure pick", {
+                    "expiry": recommended_expiry
+                })
+            else:
+                chain = ctx.market_data.get("_options_chain")
+                logger.log_detail("Using default options chain (no expiry recommendation)", {})
+
             spot = float(ctx.market_data.get("current_price") or ctx.market_data.get("price") or 0.0)
             iv_rank = ctx.market_data.get("iv_rank")
             pick = pick_structure(
@@ -803,6 +824,8 @@ def _build_decision(ctx: PipelineContext, ticker: str) -> dict[str, Any]:
         "direction": ctx.consensus.direction.value if ctx.consensus else None,
         "consensus_score": ctx.consensus.score if ctx.consensus else None,
         "p_bull": ctx.consensus.p_bull if ctx.consensus else None,
+        "recommended_expiry": ctx.market_data.get("_recommended_expiry"),
+        "chains_analyzed": len(ctx.market_data.get("chains_by_expiry", {})),
     }
 
     if ctx.sizing is not None:
