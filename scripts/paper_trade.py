@@ -482,6 +482,84 @@ def _build_summary(results: list[dict], account_size: float, book: GreeksBook) -
 
 
 # =============================================================================
+# Premarket scan (8:00 AM — live premarket prices, no broker submission)
+# =============================================================================
+
+def _run_premarket_scan(account_size: float, tickers: list[str] | None, dry_run: bool) -> None:
+    """Run full debater/consensus/sizing pipeline using premarket prices.
+
+    Saves results to paper_trade_{today}_premarket.jsonl and
+    summary_{today}_premarket.json. Never submits broker orders — this is
+    a read-only signal scan so the 8:30 AM report has fresh data.
+    """
+    tickers = tickers if tickers else WATCHLIST
+    today = _today_str()
+
+    _log("=" * 60)
+    _log(f"oa2 premarket scan — {today}")
+    _log(f"Tickers: {len(tickers)}  |  Account: ${account_size:,.0f}")
+    _log(f"Dry run: {dry_run}  |  Broker submission: DISABLED (premarket)")
+    _log("=" * 60)
+
+    book = GreeksBook(account_size=account_size)
+    monitor = PositionMonitor()
+
+    # Carry over open positions so Greeks caps are respected
+    positions_files = sorted(LOG_DIR.glob("positions_*.json"))
+    if positions_files:
+        monitor = PositionMonitor.load(positions_files[-1])
+        for pos in monitor.all_positions():
+            book.add_position(
+                trade_id=pos.trade_id,
+                underlying=pos.ticker,
+                delta=pos.delta,
+                vega=pos.vega,
+                theta=pos.theta,
+                contracts=pos.contracts,
+            )
+
+    results: list[dict] = []
+    log_path = LOG_DIR / f"paper_trade_{today}_premarket.jsonl"
+
+    with open(log_path, "w") as log_file:
+        for ticker in tickers:
+            _log(f"  Scanning {ticker} ...")
+            result = _scan_ticker(ticker, book, monitor, account_size)
+            results.append(result)
+            log_file.write(json.dumps(result, default=str) + "\n")
+            log_file.flush()
+
+            status = result["status"]
+            if status == "sized_approved":
+                _log(f"    [PM] APPROVED (no broker order — premarket scan only)")
+            elif status == "sized_rejected":
+                reason = (result.get("decision") or {}).get("sizing_reject_reason", "?")
+                _log(f"    [PM] REJECTED: {reason}")
+            else:
+                _log(f"    [PM] {status}")
+
+    summary = _build_summary(results, account_size, book)
+    summary["scan_type"] = "premarket"
+    summary_path = LOG_DIR / f"summary_{today}_premarket.json"
+    if not dry_run:
+        summary_path.write_text(json.dumps(summary, indent=2, default=str))
+
+    approved = [r for r in results if r.get("status") == "sized_approved"]
+    rejected = [r for r in results if r.get("status") == "sized_rejected"]
+    _log(f"Premarket scan done: {len(approved)} approved, {len(rejected)} rejected → {log_path}")
+
+    if telegram_notify:
+        try:
+            msg = (
+                f"Premarket scan complete — {today}\n"
+                f"Scanned: {len(results)} | Approved: {len(approved)} | Rejected: {len(rejected)}"
+            )
+            telegram_notify.send(msg)
+        except Exception:
+            pass
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -491,6 +569,8 @@ def main() -> None:
                         help="Test mode: log to console, do not write files")
     parser.add_argument("--full-scan", action="store_true",
                         help="Run full entry scan (default if no --exit-only)")
+    parser.add_argument("--premarket-scan", action="store_true",
+                        help="Run premarket scan at 8:00 AM using live premarket prices; saves to paper_trade_{date}_premarket.jsonl; never submits broker orders")
     parser.add_argument("--exit-only", action="store_true",
                         help="Check exits on open positions only; no debaters/consensus")
     parser.add_argument("--tickers", nargs="*", default=None,
@@ -507,9 +587,13 @@ def main() -> None:
         _log("Weekend — skipping run.")
         sys.exit(0)
 
-    # Dispatch: exit-only mode or full-scan mode
+    # Dispatch: exit-only mode, premarket-scan mode, or full-scan mode
     if args.exit_only:
         _run_exit_only(account_size=args.account_size, dry_run=args.dry_run)
+        return
+
+    if args.premarket_scan:
+        _run_premarket_scan(account_size=args.account_size, tickers=args.tickers, dry_run=args.dry_run)
         return
 
     tickers = args.tickers if args.tickers else WATCHLIST

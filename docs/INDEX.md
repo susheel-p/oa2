@@ -1,124 +1,152 @@
 # tradingbot Documentation Index
 
-Complete reference for tradingbot trading system architecture, operations, and development.
+Complete reference for tradingbot architecture, operations, and development.
 
 ## Getting Started
 
-**New to tradingbot?** Start here:
-1. Read [../README.md](../README.md) — What tradingbot is and how to run it
-2. Read [DAEMON.md](DAEMON.md) — How to set up and run the automated daemon
-3. Read [ARCHITECTURE.md](ARCHITECTURE.md) — System design and components
+New to tradingbot? Start here:
+1. [../README.md](../README.md) — What tradingbot is and how to run it
+2. [DAEMON.md](DAEMON.md) — Set up and run the automated daemon
+3. [ARCHITECTURE.md](ARCHITECTURE.md) — System design and 9-layer overview
+4. [../DOCKER.md](../DOCKER.md) — Docker deployment and volume setup
 
-## Core Documentation
+---
+
+## Operations
 
 ### [DAEMON.md](DAEMON.md)
-Complete guide to running the market monitor daemon and setting up Telegram health monitoring via the watchdog system.
-- Daemon daily schedule (premarket → full-scan → exit-only → postmarket)
-- Setup instructions for Windows Task Scheduler and Linux/Mac cron
-- Daemon health watchdog (heartbeat monitoring + alerts)
-- Troubleshooting common issues
-- Performance & system requirements
+Running the market monitor daemon and Telegram health monitoring.
+- Daily schedule: premarket → full-scan → exit-only → postmarket
+- Setup for Windows / Linux / Mac
+- Heartbeat watchdog and Telegram alerts
+- Troubleshooting and system requirements
+
+### [../DOCKER.md](../DOCKER.md)
+Docker deployment guide (volumes, schedule, backups, troubleshooting).
+
+### [DEPLOY.md](DEPLOY.md)
+`deploy.ps1` reference — build image, deploy container, validate logs, run scan, generate report.
+- All parameters and flags
+- Step-by-step workflow
+- Colour-coded output guide
+- Common workflows and troubleshooting
+
+### [../REPORTS.md](../REPORTS.md)
+Trading report system — premarket, postmarket, daily insights, Obsidian integration.
+
+---
+
+## Architecture & Design
 
 ### [ARCHITECTURE.md](ARCHITECTURE.md)
-Design overview of the 9-layer system architecture.
-- Component breakdown (debaters, consensus, sizing, exit engine)
-- Data flow diagram
+9-layer system design: debaters → regime → consensus → sizing → execution.
+- Component breakdown and data flow
 - Layer responsibilities and dependencies
 - Design patterns and conventions
 
 ### [ROADMAP.md](ROADMAP.md)
-Complete production roadmap with all phases and gates.
-- Phases 0–5: Infrastructure and core debaters
-- Phases A–F: Production readiness features
-- Gate criteria and completion status
-- Next phase requirements
-
-## Analysis & Learning
-
-### [BACKTEST_LEARNINGS.md](BACKTEST_LEARNINGS.md)
-Key insights from 12-month backtest run and signal quality analysis.
-- Debater performance by regime
-- Directional vs income trade-offs
-- Vol signal reliability
-- Impact of quality gates and Kelly sizing
-
-### [CRITICAL_ANALYSIS.md](CRITICAL_ANALYSIS.md)
-Deep analysis of system gaps and opportunities identified before Phase A.
-- Signal integrity issues
-- Correlation dependencies
-- Sizing constraints
-- Production readiness gaps
-
-### [RAG_LEARNING_PLAN.md](RAG_LEARNING_PLAN.md)
-Knowledge base and RAG learning system design.
-- Learning loop architecture (shadow trades → feedback → KB update)
-- Knowledge base schema
-- Integration points in pipeline
-- Daily learner feedback workflow
-
-## Implementation Plans
-
-### [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)
-Detailed breakdown of planned improvements and their impact.
-- Signal quality enhancements
-- Sizing refinements
-- Risk management upgrades
-- Expected performance improvements
-
-### [EXECUTION_SUMMARY.md](EXECUTION_SUMMARY.md)
-Summary of major implementation milestones and execution status.
-- Completed phases
-- Key features delivered
-- Test coverage
-- Integration status
+Complete production roadmap — Phases 0–F with gate criteria and completion status.
 
 ### [STRUCTURE_PICKER_PLAN.md](STRUCTURE_PICKER_PLAN.md)
-Options structure selection and optimization strategy.
-- Structure scoring framework
-- Picker logic and constraints
-- Greeks-aware selection
+Options structure selection module design (not yet implemented).
+- Structure scoring framework, Greeks-aware selection
 - Expiration and liquidity considerations
 
-## Key Resources
-
-### Configuration Files
-- [../CLAUDE.md](../CLAUDE.md) — Claude Code working context (phases, conventions, file locations)
-- [../.env.example](../.env.example) — Environment variables template
-- [../README.md](../README.md) — Main project README
-
-### Scripts
-- `scripts/market_monitor.py` — Automated daemon
-- `scripts/watchdog.py` — Daemon health monitor
-- `scripts/paper_trade.py` — Full-scan and exit-only executor
-- `scripts/report.py` — Premarket and postmarket report generation
-- `scripts/backtest.py` — Historical backtesting
-- `scripts/bandit_warmstart.py` — Bandit prior initialization
-
-### Core Modules
-- `tradingbot/graph/pipeline.py` — Main orchestration entry point
-- `tradingbot/debaters/` — All 6 voting agents
-- `tradingbot/consensus/` — GLS aggregator + EWMA correlation
-- `tradingbot/sizing/` — Kelly engine + Greeks caps + CVaR
-- `tradingbot/execution/` — Exit engine + position monitor + roll logic
-- `tradingbot/dealer/` — GEX + walls + max pain computation
-
-## Status Summary
-
-**Current Phase:** Unsupervised paper trading validation (2-week shadow run)
-
-**Completion:**
-- ✅ Phases 0–5 (scaffold + core debaters)
-- ✅ Phases A–F (production readiness)
-- ✅ 381 tests passing
-- ✅ 12-month backtest validated (+249.5% return)
-
-**Ready for:**
-- Supervised live trading
-- Unsupervised validation run
-- Production deployment
-
-See [ROADMAP.md](ROADMAP.md) for detailed gate criteria.
+### [RAG_LEARNING_PLAN.md](RAG_LEARNING_PLAN.md)
+Daily learning loop and knowledge base design (not yet implemented).
+- Shadow trades → outcome feedback → KB update
+- Integration points in pipeline
 
 ---
 
-*Last updated: May 19, 2026*
+## Analysis & Signal Quality
+
+### [BACKTEST_LEARNINGS.md](BACKTEST_LEARNINGS.md)
+Key insights from the 12-month backtest.
+- Debater performance by regime
+- Ticker quality spread, p_bull bimodal distribution
+- Impact of quality gates and Kelly sizing
+
+### [CRITICAL_ANALYSIS.md](CRITICAL_ANALYSIS.md)
+Deep analysis of GLS weights, Brier score, Kelly sensitivity, and sentiment redesign rationale.
+
+### [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)
+Phased signal quality improvement plan (P1–P4) with implementation code, time estimates,
+decision trees, and rollback plan.
+- P1: Directional debater (RSI/MACD/ATR + session weighting)
+- P2: Sentiment rewrite (IV-skew + earnings calendar)
+- P3: Calibrator refit
+- P4: Income + volatility debaters (deferred)
+
+---
+
+## Incident & Implementation Records
+
+### [DAEMON_FIXES.md](DAEMON_FIXES.md)
+May 21–22 daemon recovery: heartbeat file, Telegram alerts, market hours sleep logic.
+
+### [PRODUCTION_ISSUES_ANALYSIS.md](PRODUCTION_ISSUES_ANALYSIS.md)
+May 22 critical bug post-mortem: `structure_pick` guard gate, `max_loss=0.0` spurious exits,
+validation fixes and deploy verification.
+
+### [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)
+Intelligent expiry selection feature (3-phase) — completed May 22.
+Multi-expiration chain fetching, flow-driven `_recommend_expiry()`, pipeline wiring.
+
+---
+
+## Root Files (not in docs/)
+
+| File | Purpose |
+|---|---|
+| [../README.md](../README.md) | Project overview, quickstart, layout |
+| [../CLAUDE.md](../CLAUDE.md) | Claude Code working context — phases, conventions, file map |
+| [../DOCKER.md](../DOCKER.md) | Docker ops guide |
+| [../REPORTS.md](../REPORTS.md) | Report system documentation |
+| [../.env.example](../.env.example) | Environment variables template |
+
+---
+
+## Key Scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/market_monitor.py` | Daemon scheduler (scan, exit, reports) |
+| `scripts/paper_trade.py` | Full-scan and exit-only executor |
+| `scripts/report.py` | Premarket / postmarket report generator |
+| `scripts/watchdog.py` | Daemon health monitor + Telegram alerts |
+| `scripts/backtest.py` | Historical backtesting harness |
+| `scripts/bandit_warmstart.py` | Bandit prior initialization from replay |
+| `scripts/daily_learn.py` | Daily outcome feedback and learning loop |
+| `deploy.ps1` | One-command build → deploy → validate → report |
+
+## Core Modules
+
+| Module | Purpose |
+|---|---|
+| `tradingbot/graph/pipeline.py` | Main orchestration entry point |
+| `tradingbot/debaters/` | 6 voting agents (directional/income/vol/flow/sentiment/dealer) |
+| `tradingbot/consensus/` | GLS aggregator + EWMA correlation matrix |
+| `tradingbot/sizing/` | Kelly engine + Greeks caps + CVaR stress |
+| `tradingbot/execution/` | Exit engine + position monitor + roll logic |
+| `tradingbot/regime/` | 8-bucket regime classifier + session overlay |
+| `tradingbot/dataflows/` | Market data, flow adapters, moomoo integration |
+
+---
+
+## Status
+
+**All Phases A–F complete.** System in unsupervised paper trading validation.
+
+| Milestone | Status |
+|---|---|
+| Phases 0–5 (scaffold + core debaters) | ✅ |
+| Phases A–F (production readiness) | ✅ |
+| 381 tests passing | ✅ |
+| 12-month backtest validated | ✅ |
+| Docker daemon deployed | ✅ |
+| Spurious exit bug fixed (May 22) | ✅ |
+| Intelligent expiry selection (May 22) | ✅ |
+| Signal quality improvement (P1–P3) | Planned |
+
+*Last updated: May 22, 2026*

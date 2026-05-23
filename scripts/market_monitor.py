@@ -141,6 +141,7 @@ def _time_until_next_event(target_hour: int, target_minute: int) -> float:
 
 _TIMEOUTS = {
     "FULL-SCAN": 1800,           # 30 min — debaters + chain fetch for 22 tickers
+    "PREMARKET-SCAN": 1800,      # 30 min — same pipeline, no broker submission
     "PREMARKET-REPORT": 600,     # 10 min
     "POSTMARKET-REPORT": 600,    # 10 min
     "EXIT-ONLY": 120,            # 2 min — must fit inside the 60s scheduler tick
@@ -205,6 +206,7 @@ class MarketMonitor:
         self.scan_on_start = scan_on_start
         self.log_file = _get_daemon_log_path() if daemon_mode else None
         self.full_scan_done_today = False
+        self.premarket_scan_done_today = False
         self.premarket_done_today = False
         self.postmarket_done_today = False
         self.learning_loop_done_today = False
@@ -246,6 +248,23 @@ class MarketMonitor:
         cmd = self._build_cmd("exit-only")
         _run_command(cmd, "EXIT-ONLY", self.log_file)
 
+    def _run_premarket_scan(self) -> None:
+        """Run premarket signal scan at 8:00 AM using live premarket prices."""
+        with self.lock:
+            if self.premarket_scan_done_today:
+                return
+
+        now = _now_et()
+        _log(f"Premarket scan trigger at {now.strftime('%H:%M:%S')} (target 08:30:00)")
+
+        cmd = [sys.executable, "scripts/paper_trade.py", "--premarket-scan"]
+        if self.dry_run:
+            cmd.append("--dry-run")
+        if _run_command(cmd, "PREMARKET-SCAN"):
+            with self.lock:
+                self.premarket_scan_done_today = True
+                _log("Premarket scan flagged as done for today")
+
     def _run_premarket_report(self) -> None:
         """Generate premarket report at 8:30 AM."""
         with self.lock:
@@ -253,7 +272,7 @@ class MarketMonitor:
                 return
 
         now = _now_et()
-        _log(f"Premarket report trigger at {now.strftime('%H:%M:%S')} (target 08:30:00)", self.log_file)
+        _log(f"Premarket report trigger at {now.strftime('%H:%M:%S')} (target 09:00:00)", self.log_file)
 
         cmd = [sys.executable, "scripts/report.py", "--premarket"]
         if _run_command(cmd, "PREMARKET-REPORT", self.log_file):
@@ -321,6 +340,7 @@ class MarketMonitor:
         """Reset daily flags at midnight."""
         with self.lock:
             self.full_scan_done_today = False
+            self.premarket_scan_done_today = False
             self.premarket_done_today = False
             self.postmarket_done_today = False
             self.learning_loop_done_today = False
@@ -345,9 +365,16 @@ class MarketMonitor:
         if not self.once and is_market_day():
             now = _now_et()
             today = now.date()
-            premarket_target = now.replace(hour=8, minute=30, second=0, microsecond=0)
+            premarket_scan_target = now.replace(hour=8, minute=30, second=0, microsecond=0)
+            premarket_target = now.replace(hour=9, minute=0, second=0, microsecond=0)
             postmarket_target = now.replace(hour=16, minute=15, second=0, microsecond=0)
             learning_target = now.replace(hour=17, minute=0, second=0, microsecond=0)
+
+            log_dir = Path(__file__).parent.parent / "logs"
+            premarket_scan_path = log_dir / f"paper_trade_{today.isoformat()}_premarket.jsonl"
+            if now >= premarket_scan_target and not premarket_scan_path.exists():
+                _log("Catch-up: premarket scan missed; running now")
+                self._run_premarket_scan()
 
             premarket_path = REPORTS_DIR / today.isoformat() / "premarket.md"
             if now >= premarket_target and not premarket_path.exists():
@@ -373,10 +400,18 @@ class MarketMonitor:
                 self._reset_daily_flags()
                 last_daily_reset = now.date()
 
-            # Check for premarket report at 8:30 AM
+            # Run premarket scan at 8:30 AM (fresh signals using live premarket prices)
             if (
                 now.hour == 8
                 and now.minute == 30
+                and is_market_day(now)
+            ):
+                self._run_premarket_scan()
+
+            # Generate premarket report at 9:00 AM (reads today's premarket scan)
+            if (
+                now.hour == 9
+                and now.minute == 0
                 and is_market_day(now)
             ):
                 self._run_premarket_report()

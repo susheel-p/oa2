@@ -311,3 +311,72 @@ Instead of just "IV is expensive/cheap", score how good the specific trade struc
 4. **Monday 9:35 AM:** Deploy P1+P2+P3, run shadow scan
    - Target: 3-5 approvals → paper trading cutover
    - If <3: Debug mean p_bull, investigate Kelly gate tuning
+
+---
+
+## Root Cause Chain (Summary)
+
+```
+Debater accuracy ≈ 50% (baseline, no signal)
+  ↓
+Raw p_bull ≈ 0.54-0.57 (barely bullish)
+  ↓
+Calibrator slope a = 0.0998 (flattened, p_bull barely moves)
+  ↓
+Kelly gate: min_edge = 0.52 (rejects p_bull < 0.52)
+  ↓
+Mean p_bull = 0.574 (passes gate barely)
+  ↓
+But on 22-ticker scan: some tickers p_bull < 0.52 after calibration
+  ↓
+Result: 0/22 approved trades
+```
+
+**Fix:** Improve debater accuracy to 55-60% → push mean p_bull to 0.56+ → Kelly passes reliably.
+
+---
+
+## Work Breakdown (Time Estimates)
+
+| Task | Time | Cumulative | Start |
+|------|------|------------|-------|
+| P1.1: RSI/MACD/ATR | 1.5 hr | 1.5 hr | Tonight 7pm |
+| Backtest + validation | 1 hr | 2.5 hr | Tonight 8:30pm |
+| P1.2: Session weighting | 1 hr | 3.5 hr | Tonight 9:30pm |
+| Backtest + validation | 1 hr | 4.5 hr | Tonight 10:30pm |
+| P2.1: IV-skew sentiment | 2 hr | 6.5 hr | Tomorrow 9am |
+| Backtest + validation | 1 hr | 7.5 hr | Tomorrow 11am |
+| P3.1: Refit calibrator | 0.25 hr | 7.75 hr | Tomorrow 12pm |
+| P1.3: Relative strength | 2 hr | 9.75 hr | Tomorrow 2pm (if time) |
+| Monday: Full validation | 0.5 hr | 0.5 hr | Monday 9:35am |
+
+---
+
+## Decision Trees
+
+### If P1.1 backtest shows directional accuracy < 55%
+1. Check: Are RSI/MACD signals noisy on backtest period?
+2. Try: Add volume confirmation (vol > 2× MA) to reduce false signals
+3. Fallback: Keep RSI/MACD but reduce Group E weight (0.10 instead of 0.12 per signal)
+
+### If P2.1 sentiment accuracy < 52%
+1. Check: Is earnings filter too aggressive (killing signal ±5 days)?
+2. Try: Widen earnings window to ±7 days
+3. Fallback: Revert to simple IV-skew only (no earnings, no call/put ratio)
+
+### If Monday shows < 3 approvals
+1. Check: Did P1+P2 improvements actually increase mean p_bull to 0.56+?
+2. Try: Implement P1.3 (relative strength) immediately for second scan
+3. Fallback: Soft-lift Kelly min_edge from 0.52 to 0.50 for one-off validation
+
+---
+
+## Rollback Plan
+
+If accuracy regresses at any point:
+1. Revert changes to feature branch
+2. Restore previous calibrator state from git history
+3. Re-run validation on working baseline
+4. Debug isolated component before re-introducing
+
+All changes are committed to feature branches before Monday cutover, so rollback is a single `git revert`.

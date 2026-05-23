@@ -186,27 +186,40 @@ def _compute_scenario_price(current_price: float, pct_move: float) -> float:
 # =============================================================================
 
 def generate_premarket(date_str: str | None = None, log_dir: Path | None = None, reports_dir: Path | None = None) -> None:
-    """Generate premarket report for date (default: yesterday's scan for today's trading)."""
+    """Generate premarket report using today's premarket scan (or fallback to full-scan / yesterday).
+
+    Scan file priority:
+      1. paper_trade_{report_date}_premarket.jsonl  — 8:00 AM premarket scan (preferred)
+      2. paper_trade_{report_date}.jsonl            — same-day full scan if premarket scan missing
+      3. paper_trade_{yesterday}.jsonl              — legacy fallback
+    """
     if log_dir is None:
         log_dir = _get_log_dir()
     if reports_dir is None:
         reports_dir = _get_reports_dir()
 
-    if date_str:
-        scan_date = date_str
-        report_label = f"for {date_str}"
+    report_date = date_str or _today_str()
+
+    # Resolve scan file: prefer today's premarket scan, then today's full scan, then yesterday
+    premarket_scan = log_dir / f"paper_trade_{report_date}_premarket.jsonl"
+    fullscan_today = log_dir / f"paper_trade_{report_date}.jsonl"
+    fullscan_yesterday = log_dir / f"paper_trade_{_get_yesterday_str(date_str)}.jsonl"
+
+    if premarket_scan.exists():
+        log_file = premarket_scan
+        scan_label = "premarket scan"
+    elif fullscan_today.exists():
+        log_file = fullscan_today
+        scan_label = "today's full scan"
+    elif fullscan_yesterday.exists():
+        log_file = fullscan_yesterday
+        scan_label = "yesterday's scan (premarket scan not yet run)"
     else:
-        scan_date = _get_yesterday_str()
-        report_label = f"(scanning yesterday's signals)"
-
-    log_file = log_dir / f"paper_trade_{scan_date}.jsonl"
-    positions_file = log_dir / f"positions_{scan_date}.json"
-
-    _log(f"Generating premarket report {report_label}")
-
-    if not log_file.exists():
-        _log_error(f"No scan log found: {log_file}")
+        _log_error(f"No scan log found for {report_date} — run paper_trade.py --premarket-scan first")
         return
+
+    positions_file = log_dir / f"positions_{report_date}.json"
+    _log(f"Generating premarket report for {report_date} using {scan_label}: {log_file.name}")
 
     scan_records = _load_jsonl(log_file)
     if not scan_records:
@@ -222,15 +235,16 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
     _log(f"Found {len(approved)} approved trades, {len(rejected)} rejected")
 
     lines = []
-    lines.append(f"# Premarket Report — {scan_date}")
+    lines.append(f"# Premarket Report — {report_date}")
     lines.append("")
     lines.append(f"Generated: {_now_et().strftime('%Y-%m-%d %H:%M:%S %Z')}")
     lines.append("")
-    lines.append(f"Based on yesterday's scan ({scan_date}). Prices are premarket.")
+    lines.append(f"Signal source: {scan_label} (`{log_file.name}`). Prices are live premarket.")
     lines.append("")
 
     lines.append("## Summary")
     lines.append("")
+    lines.append(f"- Scan date: {report_date} ({scan_label})")
     lines.append(f"- Tickers scanned: {len(scan_records)}")
     lines.append(f"- Approved for trading: {len(approved)}")
     lines.append(f"- Rejected: {len(rejected)}")
@@ -238,7 +252,7 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
     lines.append("")
 
     # Load executions to cross-reference with approvals
-    entry_execs, _ = _load_executions(log_dir, scan_date)
+    entry_execs, _ = _load_executions(log_dir, report_date)
     entry_exec_tickers = {e.get("ticker"): e for e in entry_execs}
 
     # Execution status cross-reference
@@ -279,6 +293,9 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
 
     lines.append("## Approved Trades — Entry Setup")
     lines.append("")
+    if not approved:
+        lines.append("*No trades approved today.*")
+        lines.append("")
     for rec in approved:
         ticker = rec.get("ticker", "?")
         decision = rec.get("decision", {})
@@ -288,13 +305,18 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
         kelly = sizing.get("kelly", {})
 
         direction = decision.get("direction", "?")
-        p_bull = consensus.get("p_bull", 0)
+        # p_bull lives in consensus; decision may also carry it — prefer consensus
+        p_bull = consensus.get("p_bull") or decision.get("p_bull") or 0
         score = decision.get("consensus_score", 0)
         contracts = decision.get("contracts", 0)
         max_risk = decision.get("max_dollars_at_risk", 0)
 
         current_price = _fetch_price(ticker)
         if current_price is None:
+            lines.append(f"### {ticker} — {direction}")
+            lines.append("")
+            lines.append("*Price unavailable — scenario table skipped.*")
+            lines.append("")
             continue
 
         lines.append(f"### {ticker} — {direction} (p_bull={_fmt_pct(p_bull*100)}, score={_fmt_pct(score*100)})")
@@ -315,18 +337,16 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
         lines.append("| Scenario | Price | Action |")
         lines.append("|----------|-------|--------|")
 
+        # pct values are already fractions (0.02 = 2%) — pass directly, not *100
         scenarios = [
-            ("+2%", 0.02),
-            ("+1%", 0.01),
-            ("-1%", -0.01),
-            ("-2%", -0.02),
+            ("+2%", 2.0),
+            ("+1%", 1.0),
+            ("-1%", -1.0),
+            ("-2%", -2.0),
         ]
         for label, pct in scenarios:
-            price = _compute_scenario_price(current_price, pct * 100)
-            if label.startswith("+"):
-                action = "Entry → Profit target watch"
-            else:
-                action = "Hold or reassess"
+            price = _compute_scenario_price(current_price, pct)
+            action = "Entry → Profit target watch" if pct > 0 else "Hold or reassess"
             lines.append(f"| {label} | {_fmt_price(price)} | {action} |")
 
         lines.append("")
@@ -359,14 +379,13 @@ def generate_premarket(date_str: str | None = None, log_dir: Path | None = None,
     lines.append("[[postmarket]] (after market close)")
     lines.append("")
 
-    report_date = date_str if date_str else _today_str()
     day_dir = _get_day_reports_dir(report_date, reports_dir)
     report_path = day_dir / "premarket.md"
     _write_report(report_path, "\n".join(lines))
 
     try:
         from scripts import telegram_notify
-        msg = f"📊 Premarket Report Generated\n{report_date}\n{len(scan_records)} scanned, {len([s for s in scan_records if s.get('approved')])} approved"
+        msg = f"Premarket Report Generated\n{report_date}\n{len(scan_records)} scanned, {len(approved)} approved"
         telegram_notify.send(msg)
     except Exception:
         pass
@@ -531,9 +550,10 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
         for rec in rejected_recs:
             ticker = rec.get("ticker", "?")
             decision = rec.get("decision", {})
+            consensus = rec.get("consensus", {})
             direction = decision.get("direction", "?")
             reason = decision.get("sizing_reject_reason", "Unknown")
-            p_bull = decision.get("p_bull", 0)
+            p_bull = consensus.get("p_bull") or decision.get("p_bull") or 0
             lines.append(f"- **{ticker}** ({direction}, p_bull={_fmt_pct(p_bull*100)}): {reason}")
         lines.append("")
 
