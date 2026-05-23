@@ -472,13 +472,55 @@ def generate_postmarket(date_str: str | None = None, log_dir: Path | None = None
         lines.append("No exit events today.")
         lines.append("")
 
-    # Section 4: Live Broker Positions (skip if moomoo unavailable)
-    # Note: Skipping live positions fetch to prevent connection timeouts.
-    # Use positions snapshot from paper_trade execution instead.
+    # Section 4: Live Broker Positions (fetch with strict 5s timeout)
     lines.append("## Live Broker Positions")
     lines.append("")
-    lines.append("*Live account data unavailable (OpenD not reachable). Refer to execution and positions logs above.*")
-    lines.append("")
+    live_positions = []
+    try:
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+        def _fetch_live_positions_safe():
+            """Fetch live positions with timeout, returns empty list on failure."""
+            try:
+                # Disable moomoo debug logging to speed up connection
+                import os
+                os.environ["MOOMOO_LOG_LEVEL"] = "ERROR"
+
+                from tradingbot.dataflows.moomoo_data import fetch_account_positions
+                result = fetch_account_positions()
+                return result or []
+            except Exception as e:
+                _log(f"Warning: fetch_account_positions failed: {e}")
+                return []
+
+        # Use ThreadPoolExecutor with aggressive 5 second timeout
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_fetch_live_positions_safe)
+            try:
+                live_positions = future.result(timeout=5)
+            except FuturesTimeoutError:
+                _log("Warning: Live positions fetch timed out after 5s")
+                live_positions = []
+    except Exception as e:
+        _log(f"Warning: Live positions unavailable: {e}")
+        live_positions = []
+
+    if live_positions:
+        lines.append("| Symbol | Qty | Cost | Market Value | P&L | Today P&L |")
+        lines.append("|--------|-----|------|--------------|-----|-----------|")
+        for pos in live_positions:
+            code = pos.get("code", "?")
+            qty = pos.get("qty", 0)
+            cost = pos.get("cost_price", 0)
+            market_val = pos.get("market_val", 0)
+            pl_val = pos.get("pl_val", 0)
+            today_pl = pos.get("today_pl_val", 0)
+            lines.append(f"| {code} | {qty} | {_fmt_price(cost)} | {_fmt_dollar(market_val)} | {_fmt_dollar(pl_val)} | {_fmt_dollar(today_pl)} |")
+        lines.append("")
+    else:
+        lines.append("*No open positions in broker account (or OpenD not reachable within 5s timeout).*")
+        lines.append("")
 
     # Watch list
     if rejected_recs:
