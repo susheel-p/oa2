@@ -62,6 +62,7 @@ for _flag in (
 # ── oa2 imports ───────────────────────────────────────────────────────────────
 from tradingbot.execution.monitor import PositionMonitor, OpenPosition, Leg
 from tradingbot.graph.pipeline import run as pipeline_run
+from tradingbot.learning.knowledge_base import KnowledgeBase, default_kb_path
 from tradingbot.sizing.limits import GreeksBook
 from tradingbot.watchlist.builder import WATCHLIST
 
@@ -88,6 +89,37 @@ def _ts() -> str:
 
 def _log(msg: str) -> None:
     print(f"[{_ts()}] {msg}", flush=True)
+
+
+def _print_rag_status() -> None:
+    """Print RAG learning status at startup."""
+    kb_path = default_kb_path()
+    try:
+        kb = KnowledgeBase.load(kb_path)
+        if not kb.tickers and not kb.posteriors:
+            _log("RAG Learning: KB exists but empty (run backtest --bandit to seed)")
+            return
+
+        n_tickers = len(kb.tickers)
+        n_posteriors = sum(len(v) for v in kb.posteriors.values())
+        last_updated = kb.last_updated[-10:] if kb.last_updated else "unknown"
+
+        _log(f"RAG Learning: ENABLED")
+        _log(f"  KB last updated: {last_updated}")
+        _log(f"  Tickers tracked: {n_tickers}")
+        _log(f"  Outcomes used: {kb.n_outcomes_used}")
+        _log(f"  Thompson posteriors: {n_posteriors}")
+
+        # Count blacklisted tickers
+        blacklisted = sum(
+            1 for stats in kb.tickers.values()
+            if stats.hit_rate < 0.43 and stats.dollar_weighted_win_rate < 0.45
+        )
+        if blacklisted > 0:
+            _log(f"  ⚠️  {blacklisted} ticker(s) blacklisted (hit_rate < 43%)")
+
+    except Exception as e:
+        _log(f"RAG Learning: DISABLED (KB load error: {str(e)[:50]})")
 
 
 def _log_execution(record: dict) -> None:
@@ -255,6 +287,7 @@ def _process_exit_alerts(
             trade_id = alert["trade_id"]
             pos = monitor.get(trade_id)
             if pos:
+                monitor.lock_for_exit(trade_id)
                 ticker = pos.ticker
                 _log(f"Executing EXIT for {ticker} ({trade_id}): {alert['reason']}")
                 fills: list[dict] = []
@@ -287,9 +320,104 @@ def _process_exit_alerts(
                     "exit_urgency": alert.get("urgency"),
                     "current_pnl": alert.get("current_pnl"),
                 })
+
+                # Notify via Telegram
+                if telegram_notify is not None:
+                    try:
+                        success = telegram_notify.notify_exit(ticker, alert)
+                        if success:
+                            _log(f"  [TG] Exit alert sent via Telegram")
+                        else:
+                            _log(f"  [TG] Exit alert failed (API returned False)")
+                    except Exception as e:
+                        _log(f"  [TG] exit notify failed: {e}")
+
                 monitor.remove(trade_id)
                 if book is not None:
                     book.remove_position(trade_id)
+
+
+def _run_entry_only(account_size: float, tickers: list[str], dry_run: bool) -> None:
+    """Entry-only mode: scan for new positions, skip tickers with open positions.
+
+    Guards against entry/exit conflicts:
+    - Skip any ticker with an open position (unless locked for exit)
+    - Lock prevents entry from adding to positions being closed
+    """
+    from tradingbot.execution.monitor import PositionMonitor
+
+    today = _today_str()
+    positions_path = LOG_DIR / f"positions_{today}.json"
+
+    # Carry-over logic: load from previous day if today's doesn't exist yet
+    if not positions_path.exists():
+        positions_files = sorted(LOG_DIR.glob("positions_*.json"))
+        positions_files = [p for p in positions_files if p.name != f"positions_{today}.json"]
+        if positions_files:
+            latest_file = positions_files[-1]
+            _log(f"Carrying over open positions from previous session: {latest_file}")
+            monitor = PositionMonitor.load(latest_file)
+        else:
+            _log("No previous open positions found. Starting fresh.")
+            monitor = PositionMonitor()
+        monitor.save(positions_path)
+    else:
+        monitor = PositionMonitor.load(positions_path)
+
+    # Filter tickers: skip those with open positions (entry guards)
+    eligible_tickers = [t for t in tickers if not monitor.has_position_for(t)]
+    skipped_tickers = [t for t in tickers if monitor.has_position_for(t)]
+
+    if skipped_tickers:
+        _log(f"Skipping {len(skipped_tickers)} ticker(s) with open position(s): {', '.join(skipped_tickers)}")
+
+    if not eligible_tickers:
+        _log("All tickers have open positions. No entry opportunities.")
+        return
+
+    _print_rag_status()
+    _log(f"Running entry scan for {len(eligible_tickers)} eligible ticker(s) ...")
+
+    # Run full pipeline on eligible tickers
+    book = GreeksBook(account_size=account_size)
+    for pos in monitor.all_positions():
+        book.add_position(
+            trade_id=pos.trade_id,
+            underlying=pos.ticker,
+            delta=pos.delta,
+            vega=pos.vega,
+            theta=pos.theta,
+            contracts=pos.contracts,
+        )
+
+    results: list[dict] = []
+    log_path = LOG_DIR / f"paper_trade_{today}.jsonl"
+
+    with open(log_path, "a") as log_file:
+        for ticker in eligible_tickers:
+            try:
+                result = _scan_ticker(ticker, book, monitor, account_size)
+                results.append(result)
+            except Exception as e:
+                _log(f"  ERROR scanning {ticker}: {e}")
+                results.append({
+                    "ticker": ticker,
+                    "ts": _ts(),
+                    "status": "error",
+                    "error": str(e),
+                })
+
+            # Log to JSONL
+            log_file.write(json.dumps(result) + "\n")
+            log_file.flush()
+
+    # Save updated positions
+    monitor.save(positions_path)
+
+    # Summary
+    approved_count = sum(1 for r in results if r.get("status") == "approved")
+    rejected_count = sum(1 for r in results if r.get("status") == "rejected")
+    _log(f"Entry scan done: {approved_count} approved, {rejected_count} rejected")
 
 
 def _run_exit_only(account_size: float, dry_run: bool) -> None:
@@ -324,6 +452,7 @@ def _run_exit_only(account_size: float, dry_run: bool) -> None:
         _log("No open positions to monitor.")
         return
 
+    _print_rag_status()
     _log(f"Checking {len(positions)} open position(s) ...")
 
     # Fetch fresh quotes via yfinance (single batch call)
@@ -573,6 +702,8 @@ def main() -> None:
                         help="Run premarket scan at 8:00 AM using live premarket prices; saves to paper_trade_{date}_premarket.jsonl; never submits broker orders")
     parser.add_argument("--exit-only", action="store_true",
                         help="Check exits on open positions only; no debaters/consensus")
+    parser.add_argument("--entry-only", action="store_true",
+                        help="Run entry scan only (debaters → consensus → sizing); skip tickers with open positions")
     parser.add_argument("--tickers", nargs="*", default=None,
                         help="Override ticker list (default: all 22)")
     parser.add_argument("--account-size", type=float,
@@ -587,9 +718,14 @@ def main() -> None:
         _log("Weekend — skipping run.")
         sys.exit(0)
 
-    # Dispatch: exit-only mode, premarket-scan mode, or full-scan mode
+    # Dispatch: exit-only mode, entry-only mode, premarket-scan mode, or full-scan mode
     if args.exit_only:
         _run_exit_only(account_size=args.account_size, dry_run=args.dry_run)
+        return
+
+    if args.entry_only:
+        tickers = args.tickers if args.tickers else WATCHLIST
+        _run_entry_only(account_size=args.account_size, tickers=tickers, dry_run=args.dry_run)
         return
 
     if args.premarket_scan:
@@ -605,6 +741,8 @@ def main() -> None:
     _log(f"Tickers: {len(tickers)}  |  Account: ${account_size:,.0f}")
     _log(f"Dry run: {args.dry_run}")
     _log("=" * 60)
+
+    _print_rag_status()
 
     # Shared book and monitor across all tickers
     book = GreeksBook(account_size=account_size)

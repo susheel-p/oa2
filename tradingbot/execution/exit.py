@@ -1,6 +1,6 @@
 """Exit rules engine — Phase C2.
 
-Evaluates six exit rules in priority order for each open position.
+Evaluates seven exit rules in priority order for each open position.
 Rules are evaluated against the current market context and position state.
 The first rule that fires wins — priority order is by urgency.
 
@@ -240,7 +240,7 @@ class ExitEngine:
         return self._no_exit(pos)
 
     def _check_dte_emergency(self, pos: OpenPosition) -> ExitDecision:
-        """Rule 2: Close any position with DTE <= threshold to avoid assignment."""
+        """Rule 3: Close any position with DTE <= threshold to avoid assignment."""
         has_short_leg = pos.structure in {
             "IRON_CONDOR", "SHORT_PREMIUM_FADE", "VERTICAL_CALL_SPREAD",
             "VERTICAL_PUT_SPREAD", "CALENDAR_CALL", "CALENDAR_PUT",
@@ -263,7 +263,7 @@ class ExitEngine:
         return self._no_exit(pos)
 
     def _check_hard_eod(self, pos: OpenPosition, context: dict[str, Any]) -> ExitDecision:
-        """Rule 3: Force-close intraday positions at 3:55 PM ET."""
+        """Rule 4: Force-close intraday positions at 3:55 PM ET."""
         is_intraday = pos.structure in {
             "LONG_GAMMA_SCALP", "SHORT_PREMIUM_FADE",
         } or pos.entry_dte <= 1
@@ -293,7 +293,7 @@ class ExitEngine:
         return self._no_exit(pos)
 
     def _check_profit_target(self, pos: OpenPosition) -> ExitDecision:
-        """Rule 4: Close when gain >= profit_target_pct × max_profit."""
+        """Rule 5: Close when gain >= profit_target_pct × max_profit."""
         if pos.max_profit <= 0:
             return self._no_exit(pos)
 
@@ -318,7 +318,7 @@ class ExitEngine:
         return self._no_exit(pos)
 
     def _check_time_stop(self, pos: OpenPosition) -> ExitDecision:
-        """Rule 5: Flag for review after time_stop_days from entry."""
+        """Rule 6: Flag for review after time_stop_days from entry."""
         age_days = pos.age_days_against(self.clock)
         if age_days >= self.time_stop_days:
             return ExitDecision(
@@ -337,7 +337,7 @@ class ExitEngine:
         return self._no_exit(pos)
 
     def _check_regime_flip(self, pos: OpenPosition, context: dict[str, Any]) -> ExitDecision:
-        """Rule 6: Flag if current regime differs from entry regime.
+        """Rule 7: Flag if current regime differs from entry regime.
 
         Only evaluates if current_regime and consensus direction are in context.
         When the regime has flipped AND the consensus direction also flipped,

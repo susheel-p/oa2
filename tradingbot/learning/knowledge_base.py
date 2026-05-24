@@ -160,6 +160,23 @@ def _regime_blocked(stats: RegimeStats) -> bool:
 # --- KB main type ------------------------------------------------------------
 
 @dataclass
+class BetaPosteriorData:
+    """Serializable Beta(alpha, beta) posterior for Thompson sampling."""
+    alpha: float = 1.0
+    beta: float = 1.0
+
+    @property
+    def mean(self) -> float:
+        return self.alpha / (self.alpha + self.beta)
+
+    @property
+    def std(self) -> float:
+        """Standard deviation of Beta distribution."""
+        n = self.alpha + self.beta
+        return ((self.alpha * self.beta) / (n * n * (n + 1))) ** 0.5
+
+
+@dataclass
 class KnowledgeBase:
     schema_version: int = SCHEMA_VERSION
     last_updated: str = ""
@@ -169,6 +186,7 @@ class KnowledgeBase:
     regimes: dict[str, RegimeStats] = field(default_factory=dict)
     debaters: dict[str, DebaterStats] = field(default_factory=dict)
     structures: dict[str, StructureStats] = field(default_factory=dict)
+    posteriors: dict[str, dict[int, BetaPosteriorData]] = field(default_factory=dict)  # {debater_name: {regime_id: BetaPosterior}}
 
     # --- Read API (for pipeline / RAG context) ---
 
@@ -185,6 +203,12 @@ class KnowledgeBase:
             return 1.0
         stats = self.regimes.get(regime_label.lower())
         return _regime_multiplier(stats) if stats else 1.0
+
+    def get_posterior(self, debater_name: str, regime_id: int) -> BetaPosteriorData:
+        """Get Thompson posterior for (debater, regime). Returns default if missing."""
+        if debater_name not in self.posteriors:
+            return BetaPosteriorData()
+        return self.posteriors[debater_name].get(regime_id, BetaPosteriorData())
 
     def summary_rows(self) -> list[tuple[str, float, float, int]]:
         """Return (ticker, hit_rate, avg_pnl_pct, n_trades) sorted by hit_rate desc."""
@@ -225,6 +249,13 @@ class KnowledgeBase:
                     "hit_rate": round(s.hit_rate, 4),
                     "avg_pnl": round(s.avg_pnl, 2)}
                 for k, s in self.structures.items()
+            },
+            "posteriors": {
+                debater: {
+                    str(regime_id): {"alpha": round(post.alpha, 4), "beta": round(post.beta, 4), "mean": round(post.mean, 4)}
+                    for regime_id, post in regimes.items()
+                }
+                for debater, regimes in self.posteriors.items()
             },
         }
 
@@ -285,6 +316,14 @@ class KnowledgeBase:
                 total_pnl=s.get("total_pnl", 0.0),
                 sum_max_loss=s.get("sum_max_loss", 0.0),
             )
+        for debater, regimes in (data.get("posteriors") or {}).items():
+            kb.posteriors[debater] = {}
+            for regime_id_str, post_data in regimes.items():
+                regime_id = int(regime_id_str)
+                kb.posteriors[debater][regime_id] = BetaPosteriorData(
+                    alpha=post_data.get("alpha", 1.0),
+                    beta=post_data.get("beta", 1.0),
+                )
         return kb
 
 

@@ -272,7 +272,7 @@ if ($RunScan) {
 
 if (-not $SkipReport) {
     Write-Step "Triggering report generation inside container"
-    $reportCmd = "cd /app; python scripts/report.py --mode postmarket 2>&1 | tail -30"
+    $reportCmd = "cd /app; python scripts/report.py --postmarket 2>&1 | tail -30"
     docker exec $CONTAINER bash -c $reportCmd
     if ($LASTEXITCODE -eq 0) {
         Write-OK "Report generation completed"

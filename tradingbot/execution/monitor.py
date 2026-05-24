@@ -96,6 +96,10 @@ class OpenPosition:
     peak_pnl: float = 0.0           # highest P&L reached (high water mark for trailing stops)
     last_checked: float = field(default_factory=time.time)
 
+    # Exit lock (prevents entry daemon from adding to positions being closed)
+    locked_for_exit: bool = False   # True when exit daemon is closing this position
+    locked_for_exit_at: float = 0.0 # timestamp when lock was acquired (unix time)
+
     # Legs are optional; structures registered before the legs refactor (and
     # most existing tests) leave this empty and rely on entry-time Greeks.
     legs: list[Leg] = field(default_factory=list)
@@ -202,6 +206,8 @@ class OpenPosition:
             "peak_pnl": self.peak_pnl,
             "current_underlying_price": self.current_underlying_price,
             "current_dte": self.current_dte,
+            "locked_for_exit": self.locked_for_exit,
+            "locked_for_exit_at": self.locked_for_exit_at,
             "legs": [
                 {
                     "underlying": l.underlying,
@@ -253,6 +259,8 @@ class OpenPosition:
             peak_pnl=d.get("peak_pnl", 0.0),
             current_underlying_price=d.get("current_underlying_price", 0.0),
             current_dte=d.get("current_dte", 0),
+            locked_for_exit=d.get("locked_for_exit", False),
+            locked_for_exit_at=d.get("locked_for_exit_at", 0.0),
             legs=legs,
         )
 
@@ -366,6 +374,32 @@ class PositionMonitor:
     def positions_near_expiry(self, dte_threshold: int = 2) -> list[OpenPosition]:
         """Return positions with current_dte <= threshold."""
         return [p for p in self._positions.values() if p.current_dte <= dte_threshold]
+
+    def has_position_for(self, ticker: str) -> bool:
+        """Check if ticker has any open position (regardless of lock status)."""
+        return any(p.ticker == ticker for p in self._positions.values())
+
+    def has_locked_position_for(self, ticker: str) -> bool:
+        """Check if ticker has a position locked for exit."""
+        return any(p.ticker == ticker and p.locked_for_exit for p in self._positions.values())
+
+    def lock_for_exit(self, trade_id: str) -> bool:
+        """Mark position as locked for exit. Returns True if successful."""
+        pos = self._positions.get(trade_id)
+        if pos is None:
+            return False
+        pos.locked_for_exit = True
+        pos.locked_for_exit_at = self._clock.now()
+        return True
+
+    def unlock_for_exit(self, trade_id: str) -> bool:
+        """Remove exit lock from position. Returns True if successful."""
+        pos = self._positions.get(trade_id)
+        if pos is None:
+            return False
+        pos.locked_for_exit = False
+        pos.locked_for_exit_at = 0.0
+        return True
 
     def net_pnl(self) -> float:
         """Sum of current P&L across all open positions."""

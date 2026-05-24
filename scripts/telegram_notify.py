@@ -109,6 +109,28 @@ def notify_trade(ticker: str, result: dict, fills: list[dict] | None = None) -> 
     return send(format_trade(ticker, result, fills))
 
 
+def format_exit(
+    ticker: str,
+    alert: dict,
+) -> str:
+    """Build a compact summary of an exit alert."""
+    reason = alert.get("reason", "?")
+    urgency = alert.get("urgency", "?").upper() if alert.get("urgency") else "?"
+    pnl = alert.get("current_pnl", 0)
+    trade_id = alert.get("trade_id", "?")
+
+    lines = [
+        f"Position EXIT: {ticker} [{trade_id}]",
+        f"Reason: {reason}  Urgency: {urgency}",
+        f"P&L: ${pnl:+.2f}",
+    ]
+    return "\n".join(lines)
+
+
+def notify_exit(ticker: str, alert: dict) -> bool:
+    return send(format_exit(ticker, alert))
+
+
 def notify_summary(summary: dict) -> bool:
     text = (
         "Trading run complete\n"

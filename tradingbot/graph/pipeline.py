@@ -26,6 +26,7 @@ from tradingbot.dealer.agent import DealerAgent
 from tradingbot.debaters.runner import DebaterEnsemble
 from tradingbot.execution.exit import ExitEngine
 from tradingbot.execution.monitor import ChainProvider, PositionMonitor
+from tradingbot.learning.knowledge_base import default_kb_path, KnowledgeBase
 from tradingbot.performance.bandit import BanditEngine
 from tradingbot.regime.classifier import RegimeClassifier
 from tradingbot.regime.session import get_session_state, session_weight_multipliers
@@ -525,17 +526,106 @@ def _run_sizing(
         p_bull_adj = p_bull
     p_bull_adj = max(0.0, min(1.0, p_bull_adj))
 
+    # Load KB for attribution logging
+    kb_available = False
+    kb_metadata = {}
+    try:
+        kb = KnowledgeBase.load(default_kb_path())
+        kb_available = True
+        kb_metadata = {
+            "last_updated": kb.last_updated,
+            "window_days": kb.window_days,
+            "n_outcomes_used": kb.n_outcomes_used,
+        }
+        # Get ticker stats for attribution
+        ticker_stats = kb.tickers.get(ctx.ticker.upper())
+        if ticker_stats:
+            kb_metadata["ticker_stats"] = {
+                "n_trades": ticker_stats.n_trades,
+                "hit_rate": round(ticker_stats.hit_rate, 4),
+                "dollar_weighted_win_rate": round(ticker_stats.dollar_weighted_win_rate, 4),
+                "blacklisted": ticker_stats.hit_rate < 0.43 and ticker_stats.dollar_weighted_win_rate < 0.45,
+            }
+        # Get regime stats for attribution
+        if regime_label:
+            regime_stats = kb.regimes.get(regime_label)
+            if regime_stats:
+                kb_metadata["regime_stats"] = {
+                    "n_trades": regime_stats.n_trades,
+                    "hit_rate": round(regime_stats.hit_rate, 4),
+                }
+    except Exception:
+        kb = None
+
     # Log RAG attribution so operators can see what KB applied.
-    ctx.attribution["rag_context"] = {
-        "ticker_multiplier": round(t_mult, 3),
-        "regime_multiplier": round(r_mult, 3),
-        "combined_multiplier": round(q_mult, 3),
-        "p_bull_raw": round(p_bull, 4),
-        "p_bull_adjusted": round(p_bull_adj, 4),
+    ctx.attribution["rag_learning"] = {
+        "enabled": kb_available,
+        "kb_metadata": kb_metadata,
+        "conviction_multipliers": {
+            "ticker_multiplier": round(t_mult, 3),
+            "regime_multiplier": round(r_mult, 3),
+            "combined_multiplier": round(q_mult, 3),
+        },
+        "p_bull_adjustment": {
+            "p_bull_raw": round(p_bull, 4),
+            "p_bull_adjusted": round(p_bull_adj, 4),
+            "adjustment_factor": round(q_mult, 3),
+        },
     }
     p_bull = p_bull_adj
 
-    # --- Gate B1/B4: Kelly ---
+    # --- Gate B1/B4: Kelly with Thompson posterior scaling ---
+    # Load Thompson posteriors from KB if available (or use previously loaded KB)
+    posterior_mean = None
+    posterior_std = None
+    thompson_attribution = {
+        "enabled": False,
+        "reason": "No KB available",
+        "posteriors": {},
+    }
+    try:
+        if kb is None:
+            kb = KnowledgeBase.load(default_kb_path())
+
+        if kb and kb.posteriors:
+            regime_id = ctx.regime.regime_id if ctx.regime else 5  # default to normal+neutral
+
+            # Get average posterior across all debaters for this regime
+            all_posteriors = []
+            debater_posts = {}
+            for debater_name in ["directional", "income", "volatility", "options_flow", "sentiment"]:
+                post = kb.get_posterior(debater_name, regime_id)
+                if post.alpha > 1.0 or post.beta > 1.0:  # Has observations beyond prior
+                    all_posteriors.append(post)
+                    debater_posts[debater_name] = {
+                        "alpha": round(post.alpha, 1),
+                        "beta": round(post.beta, 1),
+                        "mean": round(post.mean, 4),
+                        "std": round(post.std, 4),
+                    }
+
+            if all_posteriors:
+                # Compute mean of all posterior means and average std
+                posterior_mean = sum(p.mean for p in all_posteriors) / len(all_posteriors)
+                posterior_std = sum(p.std for p in all_posteriors) / len(all_posteriors)
+                thompson_attribution = {
+                    "enabled": True,
+                    "reason": f"Thompson posteriors loaded for regime {regime_id}",
+                    "regime_id": regime_id,
+                    "posteriors": debater_posts,
+                    "aggregate": {
+                        "mean": round(posterior_mean, 4),
+                        "std": round(posterior_std, 4),
+                        "confidence": round(1.0 / (1.0 + posterior_std), 4),
+                    },
+                }
+            else:
+                thompson_attribution["reason"] = f"No posteriors with observations for regime {regime_id}"
+        else:
+            thompson_attribution["reason"] = "KB loaded but no posteriors present"
+    except Exception as e:
+        thompson_attribution["reason"] = f"KB load error: {str(e)}"
+
     kelly = size_from_consensus(
         p_bull=p_bull,
         direction=direction,
@@ -543,6 +633,8 @@ def _run_sizing(
         max_loss=max_loss,
         dte=dte,
         account_size=account_size,
+        posterior_mean=posterior_mean,
+        posterior_std=posterior_std,
     )
 
     kelly_diag = {
@@ -551,6 +643,7 @@ def _run_sizing(
         "edge": kelly.edge,
         "odds": kelly.odds,
         "kelly_contracts": kelly.contracts,
+        "thompson_scaling": thompson_attribution,
     }
 
     if not kelly.viable:

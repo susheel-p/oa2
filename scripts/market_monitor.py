@@ -248,6 +248,14 @@ class MarketMonitor:
         cmd = self._build_cmd("exit-only")
         _run_command(cmd, "EXIT-ONLY", self.log_file)
 
+    def _run_entry_only(self) -> None:
+        """Run entry-only if market is open (scan for new positions)."""
+        if not _is_market_open():
+            return
+
+        cmd = self._build_cmd("entry-only")
+        _run_command(cmd, "ENTRY-ONLY", self.log_file)
+
     def _run_premarket_scan(self) -> None:
         """Run premarket signal scan at 8:00 AM using live premarket prices."""
         with self.lock:
@@ -424,9 +432,10 @@ class MarketMonitor:
             ):
                 self._run_full_scan()
 
-            # Run exit-only every minute during market hours
+            # Run exit-only and entry-only every minute during market hours
             if is_market_open(now):
                 self._run_exit_only()
+                self._run_entry_only()
 
             # Check for postmarket report at 4:15 PM
             if (

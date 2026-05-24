@@ -1,18 +1,23 @@
-"""Fractional Kelly position sizer with DTE-aware scaling.
+"""Fractional Kelly position sizer with DTE-aware scaling and Thompson posterior weighting.
 
-Phase B1 + B4: Computes the recommended number of contracts for a proposed
-options trade using the fractional Kelly criterion, then scales that size
-by DTE risk bucket.
+Phase B1 + B4 + Thompson: Computes the recommended number of contracts for a proposed
+options trade using the fractional Kelly criterion, scaled by DTE risk bucket and
+Thompson posterior confidence.
 
 Kelly formula for binary bet:
     f* = (edge × (odds + 1) - 1) / odds
 
 Where:
-    edge  = win probability (p_bull for BULLISH trade, 1-p_bull for BEARISH)
+    edge  = win probability (posterior mean or p_bull for BULLISH trade, 1-p_bull for BEARISH)
     odds  = max_profit / max_loss (risk/reward ratio from chain snapshot)
 
 Quarter-Kelly (fraction=0.25) is used as the default. Options have path-
 dependent P&L and fat-tail risk; full Kelly is unsuitable.
+
+Thompson confidence scaling:
+    If posterior uncertainty is high (few observations) → scale down
+    If posterior uncertainty is low (many observations) → scale up
+    Confidence = 1.0 / (1.0 + posterior.std)  [0.5 to 1.0]
 
 DTE scaling (Phase B4):
     DTE 0-2:   0.50 × Kelly  (extreme gamma risk, short-dated)
@@ -182,6 +187,59 @@ def compute_kelly(
     )
 
 
+def apply_thompson_scaling(
+    kelly_result: KellyResult,
+    posterior_mean: float,
+    posterior_std: float,
+) -> KellyResult:
+    """Apply Thompson posterior confidence scaling to Kelly result.
+
+    High posterior uncertainty → lower sizing (few observations, uncertain).
+    Low posterior uncertainty → higher sizing (many observations, confident).
+
+    Args:
+        kelly_result: result from compute_kelly()
+        posterior_mean: posterior mean win rate from BetaPosterior
+        posterior_std: posterior standard deviation from BetaPosterior
+
+    Returns:
+        Modified KellyResult with Thompson-scaled contracts and kelly_f.
+    """
+    if kelly_result.contracts == 0:
+        return kelly_result
+
+    # Confidence = 1.0 / (1.0 + std). Ranges [0.5, 1.0].
+    # std=0 (certain) → confidence=1.0
+    # std=0.235 (Beta(1,1)) → confidence≈0.81
+    confidence = 1.0 / (1.0 + posterior_std)
+
+    # Scale Kelly fraction by confidence
+    scaled_kelly_f = kelly_result.kelly_f * confidence
+
+    # Recompute contracts with scaled Kelly
+    dollars_at_risk = kelly_result.account_size * scaled_kelly_f
+    contracts_raw = dollars_at_risk / kelly_result.odds  # Avoid division by zero in edge case
+    if kelly_result.odds > 0:
+        contracts_raw = dollars_at_risk / kelly_result.odds
+    else:
+        # Fall back to max_loss if odds is 0 (shouldn't happen with viable trades)
+        contracts_raw = dollars_at_risk / max(kelly_result.edge * 0.01, 0.001)
+
+    contracts_scaled = max(_MIN_CONTRACTS, int(contracts_raw))
+    contracts_scaled = min(contracts_scaled, _MAX_CONTRACTS)
+
+    return KellyResult(
+        contracts=contracts_scaled,
+        kelly_f=round(scaled_kelly_f, 5),
+        dte_scalar=kelly_result.dte_scalar,
+        edge=kelly_result.edge,
+        odds=kelly_result.odds,
+        account_size=kelly_result.account_size,
+        max_dollars_at_risk=round(contracts_scaled * kelly_result.odds, 2) if kelly_result.odds > 0 else 0.0,
+        reject_reason=kelly_result.reject_reason,
+    )
+
+
 def size_from_consensus(
     p_bull: float,
     direction: Literal["BULLISH", "BEARISH", "NEUTRAL"],
@@ -190,8 +248,10 @@ def size_from_consensus(
     dte: int,
     account_size: float,
     kelly_fraction: float = _KELLY_FRACTION,
+    posterior_mean: float | None = None,
+    posterior_std: float | None = None,
 ) -> KellyResult:
-    """High-level interface: derive edge from consensus p_bull, then size.
+    """High-level interface: derive edge from consensus p_bull (or posterior mean), then size.
 
     Args:
         p_bull: calibrated bullish probability from ConsensusEngine [0, 1].
@@ -202,6 +262,8 @@ def size_from_consensus(
         dte: days to expiration.
         account_size: total account equity in dollars.
         kelly_fraction: fractional Kelly multiplier (default 0.25).
+        posterior_mean: (optional) Thompson posterior mean win rate. If provided, overrides p_bull.
+        posterior_std: (optional) Thompson posterior std. If provided with posterior_mean, applies confidence scaling.
 
     Returns:
         KellyResult with contract count recommendation.
@@ -218,13 +280,16 @@ def size_from_consensus(
             reject_reason="NEUTRAL direction — no trade",
         )
 
-    # Convert p_bull to edge for each direction
-    if direction == "BULLISH":
-        edge = p_bull
-    else:  # BEARISH
-        edge = 1.0 - p_bull
+    # Use posterior mean if provided, else use p_bull consensus
+    win_rate = posterior_mean if posterior_mean is not None else p_bull
 
-    return compute_kelly(
+    # Convert to edge for each direction
+    if direction == "BULLISH":
+        edge = win_rate
+    else:  # BEARISH
+        edge = 1.0 - win_rate
+
+    kelly_result = compute_kelly(
         edge=edge,
         max_profit=max_profit,
         max_loss=max_loss,
@@ -232,3 +297,9 @@ def size_from_consensus(
         account_size=account_size,
         kelly_fraction=kelly_fraction,
     )
+
+    # Apply Thompson confidence scaling if provided
+    if posterior_mean is not None and posterior_std is not None and posterior_std > 0:
+        kelly_result = apply_thompson_scaling(kelly_result, posterior_mean, posterior_std)
+
+    return kelly_result
