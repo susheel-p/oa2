@@ -67,6 +67,14 @@ class DayResult:
     baseline_direction: str = "NEUTRAL"
     iv_rank: float = 0.50
     debater_trade_quality: dict[str, str] = field(default_factory=dict)  # {debater: APPROVE|REJECT|ABSTAIN}
+    # Monte Carlo fill simulation (if enabled)
+    mc_mean_return: float = 0.0
+    mc_std_return: float = 0.0
+    mc_win_rate: float = 0.0
+    mc_profit_target_hit_rate: float = 0.0
+    mc_stop_loss_hit_rate: float = 0.0
+    mc_timeout_rate: float = 0.0
+    mc_paths: int = 0
 
 
 @dataclass
@@ -92,6 +100,13 @@ class BacktestMetrics:
     # Paper cutover gate
     cutover_ready: bool
     cutover_reason: str
+    # Monte Carlo fill simulation (if enabled)
+    mc_paths_per_day: int = 0
+    mc_mean_win_rate: float = 0.0
+    mc_profit_target_hit_pct: float = 0.0
+    mc_stop_loss_hit_pct: float = 0.0
+    mc_timeout_pct: float = 0.0
+    mc_sharpe: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +206,150 @@ def _enrich_vol_regime(vol_regime: dict[str, Any], vix: float, put_call_skew: fl
     vol_regime["term_upward"] = vix < 22.0
     vol_regime["realized_vol"] = vol_regime.get("rv_iv_ratio", 1.0) * 0.20
     return vol_regime
+
+
+def _mc_simulate_trade(
+    closes: list[float],
+    highs: list[float],
+    lows: list[float],
+    i: int,
+    n_paths: int,
+    hold_days_range: tuple[int, int],
+    slippage_pct: float,
+    profit_target: float,
+    stop_loss: float,
+    structure: str,
+    rng,
+) -> dict[str, Any]:
+    """Simulate N Monte Carlo paths for position entered at day i.
+
+    Each path:
+      1. Random intraday entry with slippage noise
+      2. Hold for random duration (2-5 days)
+      3. Exit via profit target, stop loss, or timeout
+      4. Realized P&L as fraction of initial investment
+
+    Args:
+        closes, highs, lows: price arrays (oldest first)
+        i: current day index
+        n_paths: number of MC paths to simulate
+        hold_days_range: (min, max) hold duration tuple
+        slippage_pct: bid-ask/fill noise as fraction (e.g. 0.02 = 2%)
+        profit_target: % of max gain to close (e.g. 0.50 = 50% of theoretical max)
+        stop_loss: loss threshold as multiple of premium (e.g. 1.0)
+        structure: trade structure name (e.g. "IRON_CONDOR", "LONG_STRADDLE")
+        rng: numpy random generator
+
+    Returns:
+        dict with mean/std/win_rate/exit_reason_breakdown/n_paths_run
+    """
+    import numpy as np
+
+    if i + hold_days_range[0] >= len(closes):
+        # Not enough days left; fall back to next-day return
+        next_ret = (closes[i + 1] - closes[i]) / closes[i] if i + 1 < len(closes) else 0.0
+        return {
+            "mean_return": next_ret,
+            "std_return": 0.0,
+            "win_rate": 1.0 if next_ret > 0 else 0.0,
+            "profit_target_hit_rate": 0.0,
+            "stop_loss_hit_rate": 0.0,
+            "timeout_rate": 1.0,
+            "n_paths_run": 0,
+        }
+
+    # Classify structure as short or long vega
+    short_premium_structures = {
+        "IRON_CONDOR", "SHORT_PREMIUM_FADE",
+        "VERTICAL_CALL_SPREAD", "VERTICAL_PUT_SPREAD",
+        "CALENDAR_CALL", "CALENDAR_PUT", "DIAGONAL_SPREAD",
+    }
+    is_short_premium = structure in short_premium_structures
+
+    entry_price = closes[i]
+    pnl_list = []
+    exit_reasons = {"profit_target": 0, "stop_loss": 0, "timeout": 0}
+
+    for _ in range(n_paths):
+        # Random entry with slippage
+        slippage_noise = rng.normal(0, slippage_pct / 3.0)
+        entry = entry_price * (1 + slippage_noise)
+
+        # Random hold duration
+        hold_days = rng.integers(hold_days_range[0], hold_days_range[1] + 1)
+        hold_end_idx = min(i + hold_days, len(closes) - 1)
+
+        # Simulate each day of hold period
+        exited = False
+        exit_price = entry
+
+        for j in range(i + 1, hold_end_idx + 1):
+            if j >= len(highs) or j >= len(lows):
+                break
+
+            # Intraday range as fraction of previous close
+            prev_close = closes[j - 1]
+            range_pct = (highs[j] - lows[j]) / prev_close if prev_close > 0 else 0.0
+
+            # Favorable and adverse intraday moves
+            if is_short_premium:
+                # Short premium: want small move (compress IV)
+                favorable = closes[j] * (1 - range_pct * 0.5)  # best case intraday
+                adverse = closes[j] * (1 + range_pct * 0.5)    # worst case intraday
+                # Premium decay: assume 0.5% per day on synthetic premium
+                synthetic_premium_pct = 0.02  # 2% of entry as total premium
+            else:
+                # Long premium: want big move (expand IV)
+                favorable = closes[j] * (1 + range_pct * 0.5)
+                adverse = closes[j] * (1 - range_pct * 0.5)
+                synthetic_premium_pct = 0.02
+
+            # Check profit target (for short premium: favorable move = lower price)
+            if is_short_premium:
+                max_gain = entry - favorable  # favorable = lower price
+                max_loss = adverse - entry    # adverse = higher price
+            else:
+                max_gain = favorable - entry
+                max_loss = entry - adverse
+
+            # Profit target hit?
+            if max_gain > 0 and max_gain >= profit_target * entry * synthetic_premium_pct:
+                exit_price = favorable
+                exit_reasons["profit_target"] += 1
+                exited = True
+                break
+
+            # Stop loss hit?
+            if max_loss > 0 and max_loss >= stop_loss * entry * synthetic_premium_pct:
+                exit_price = adverse
+                exit_reasons["stop_loss"] += 1
+                exited = True
+                break
+
+        # If not exited early, close at hold_end_idx close
+        if not exited:
+            exit_price = closes[hold_end_idx]
+            exit_reasons["timeout"] += 1
+
+        # Compute realized P&L
+        pnl = (exit_price - entry) / entry
+        pnl_list.append(pnl)
+
+    # Aggregate statistics
+    pnl_array = np.array(pnl_list)
+    mean_return = float(np.mean(pnl_array))
+    std_return = float(np.std(pnl_array)) if len(pnl_array) > 1 else 0.0
+    win_rate = float(np.sum(pnl_array > 0) / len(pnl_array)) if len(pnl_array) > 0 else 0.0
+
+    return {
+        "mean_return": mean_return,
+        "std_return": std_return,
+        "win_rate": win_rate,
+        "profit_target_hit_rate": exit_reasons["profit_target"] / n_paths if n_paths > 0 else 0.0,
+        "stop_loss_hit_rate": exit_reasons["stop_loss"] / n_paths if n_paths > 0 else 0.0,
+        "timeout_rate": exit_reasons["timeout"] / n_paths if n_paths > 0 else 0.0,
+        "n_paths_run": n_paths,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -413,77 +572,118 @@ def compute_trade_quality_accuracy(results: list[DayResult], debater: str) -> di
         if quality_vote == "ABSTAIN":
             continue
 
-        abs_return = abs(r.next_day_return)
-        iv_rank = r.iv_rank
+        # Check if MC paths are available for this result
+        use_mc = r.mc_paths > 0
 
         if debater == "income":
             # Income's APPROVE = "selling premium is good"
-            # Profitability depends on: RV < IV (theta wins) and regime regime is appropriate
+            # Profitability depends on: RV < IV (theta wins) and regime is appropriate
 
-            # Dynamic threshold: higher IV rank means more permission for larger moves
-            if iv_rank > 0.65:
-                # High IV: even in distress, 1.5% move is acceptable for short premium
-                quiet_threshold = 0.015
-                volatile_threshold = 0.025
-            elif iv_rank > 0.35:
-                # Normal IV: typical move expectations
-                quiet_threshold = 0.008
-                volatile_threshold = 0.015
+            if use_mc:
+                # MC mode: use win_rate threshold
+                if quality_vote == "APPROVE":
+                    # APPROVE hits if more than 55% of paths were profitable
+                    if r.mc_win_rate > 0.55:
+                        correct += 1
+                elif quality_vote == "REJECT":
+                    # REJECT hits if less than 45% of paths were profitable
+                    if r.mc_win_rate < 0.45:
+                        correct += 1
             else:
-                # Low IV: selling premium is poor idea, better to buy vol
-                quiet_threshold = 0.005
-                volatile_threshold = 0.008
+                # Original mode: use next_day_return thresholds
+                abs_return = abs(r.next_day_return)
+                iv_rank = r.iv_rank
 
-            if quality_vote == "APPROVE":
-                # APPROVE profitable when:
-                # 1. Day is quiet (realized vol << implied vol)
-                # 2. In high-IV regime (where premium selling makes sense)
-                is_quiet = abs_return < quiet_threshold
-                in_high_iv = iv_rank > 0.60
+                # Dynamic threshold: higher IV rank means more permission for larger moves
+                if iv_rank > 0.65:
+                    # High IV: even in distress, 1.5% move is acceptable for short premium
+                    quiet_threshold = 0.015
+                    volatile_threshold = 0.025
+                elif iv_rank > 0.35:
+                    # Normal IV: typical move expectations
+                    quiet_threshold = 0.008
+                    volatile_threshold = 0.015
+                else:
+                    # Low IV: selling premium is poor idea, better to buy vol
+                    quiet_threshold = 0.005
+                    volatile_threshold = 0.008
 
-                # Hit if: day was quiet AND regime was appropriate for selling
-                if is_quiet and in_high_iv:
-                    correct += 1
-                # Also hit if: moderate move but still low IV regime (premium was really rich)
-                elif abs_return < volatile_threshold and iv_rank > 0.50:
-                    correct += 1
+                if quality_vote == "APPROVE":
+                    # APPROVE profitable when:
+                    # 1. Day is quiet (realized vol << implied vol)
+                    # 2. In high-IV regime (where premium selling makes sense)
+                    is_quiet = abs_return < quiet_threshold
+                    in_high_iv = iv_rank > 0.60
 
-            elif quality_vote == "REJECT":
-                # REJECT ("avoid selling premium") is correct when:
-                # 1. Day was very volatile, OR
-                # 2. In low-IV regime where buying vol is better
-                is_volatile = abs_return >= volatile_threshold
-                in_low_iv = iv_rank < 0.40
+                    # Hit if: day was quiet AND regime was appropriate for selling
+                    if is_quiet and in_high_iv:
+                        correct += 1
+                    # Also hit if: moderate move but still low IV regime (premium was really rich)
+                    elif abs_return < volatile_threshold and iv_rank > 0.50:
+                        correct += 1
 
-                if is_volatile or in_low_iv:
-                    correct += 1
+                elif quality_vote == "REJECT":
+                    # REJECT ("avoid selling premium") is correct when:
+                    # 1. Day was very volatile, OR
+                    # 2. In low-IV regime where buying vol is better
+                    is_volatile = abs_return >= volatile_threshold
+                    in_low_iv = iv_rank < 0.40
+
+                    if is_volatile or in_low_iv:
+                        correct += 1
             total += 1
 
         elif debater == "volatility":
             # Volatility's APPROVE depends on regime
-            in_expansion = r.regime_label in {"vol_exp_trending", "vol_exp_mean_revert", "vol_exp_neutral"}
-            in_compression = r.regime_label in {"vol_comp_trending", "vol_comp_neutral"}
 
-            is_quiet_day = abs_return < 0.008
-            is_volatile_day = abs_return >= 0.012
+            if use_mc:
+                # MC mode: use std_return and win_rate
+                in_expansion = r.regime_label in {"vol_exp_trending", "vol_exp_mean_revert", "vol_exp_neutral"}
+                in_compression = r.regime_label in {"vol_comp_trending", "vol_comp_neutral"}
 
-            if quality_vote == "APPROVE":
-                # APPROVE in expansion → long vega, hits if volatile
-                if in_expansion and is_volatile_day:
-                    correct += 1
-                # APPROVE in compression → short vega, hits if quiet
-                elif in_compression and is_quiet_day:
-                    correct += 1
-                # Neutral regimes: APPROVE is neutral guess
-                elif not (in_expansion or in_compression):
-                    correct += 1
-            elif quality_vote == "REJECT":
-                # REJECT in expansion → stay short vega, hits if quiet
-                if in_expansion and is_quiet_day:
-                    correct += 1
-                # REJECT in compression → stay long vega, hits if volatile
-                elif in_compression and is_volatile_day:
-                    correct += 1
+                if quality_vote == "APPROVE":
+                    # APPROVE in expansion → long vega, hits if high std (realized moves present)
+                    if in_expansion and r.mc_std_return > 0.005:
+                        correct += 1
+                    # APPROVE in compression → short vega, hits if high win_rate (quiet captures theta)
+                    elif in_compression and r.mc_win_rate > 0.55:
+                        correct += 1
+                    # Neutral regimes: APPROVE is neutral guess
+                    elif not (in_expansion or in_compression):
+                        correct += 1
+                elif quality_vote == "REJECT":
+                    # REJECT in expansion → stay short vega, hits if low std (no realized moves)
+                    if in_expansion and r.mc_std_return < 0.003:
+                        correct += 1
+                    # REJECT in compression → stay long vega, hits if low win_rate (theta decay hurts)
+                    elif in_compression and r.mc_win_rate < 0.45:
+                        correct += 1
+            else:
+                # Original mode: use next_day_return thresholds
+                abs_return = abs(r.next_day_return)
+                in_expansion = r.regime_label in {"vol_exp_trending", "vol_exp_mean_revert", "vol_exp_neutral"}
+                in_compression = r.regime_label in {"vol_comp_trending", "vol_comp_neutral"}
+
+                is_quiet_day = abs_return < 0.008
+                is_volatile_day = abs_return >= 0.012
+
+                if quality_vote == "APPROVE":
+                    # APPROVE in expansion → long vega, hits if volatile
+                    if in_expansion and is_volatile_day:
+                        correct += 1
+                    # APPROVE in compression → short vega, hits if quiet
+                    elif in_compression and is_quiet_day:
+                        correct += 1
+                    # Neutral regimes: APPROVE is neutral guess
+                    elif not (in_expansion or in_compression):
+                        correct += 1
+                elif quality_vote == "REJECT":
+                    # REJECT in expansion → stay short vega, hits if quiet
+                    if in_expansion and is_quiet_day:
+                        correct += 1
+                    # REJECT in compression → stay long vega, hits if volatile
+                    elif in_compression and is_volatile_day:
+                        correct += 1
             total += 1
 
     accuracy = correct / total if total > 0 else 0.0
@@ -617,6 +817,7 @@ def run_backtest(
     dynamic_deadband: bool = False,
     simulated_flow: bool = False,
     synthetic_chain: bool = False,
+    monte_carlo: int = 0,
 ) -> tuple[list[DayResult], BacktestMetrics]:
     """Run the full backtest.
 
@@ -629,6 +830,7 @@ def run_backtest(
         dynamic_deadband: whether to use dynamic consensus dead-band
         simulated_flow: whether to simulate options flow and sentiment
         synthetic_chain: whether to inject synthetic options chain data and trade structures
+        monte_carlo: number of MC paths per signal day (0 = off)
 
 
     Returns:
@@ -713,6 +915,12 @@ def run_backtest(
     # Initialize online bandit if enabled
     from tradingbot.performance.bandit import BanditEngine
     bandit = BanditEngine() if bandit_enabled else None
+
+    # Initialize RNG for Monte Carlo (deterministic seed for reproducibility)
+    rng = None
+    if monte_carlo > 0:
+        import numpy as np
+        rng = np.random.default_rng(42)
 
     all_results: list[DayResult] = []
 
@@ -809,6 +1017,24 @@ def run_backtest(
                 ctx["current_price"], iv_rank, dte, premium_dir
             )
 
+        # Monte Carlo fill simulation if enabled
+        mc_result = {}
+        if monte_carlo > 0 and rng is not None:
+            structure = ctx.get("strategy", {}).get("selected_structure", "IRON_CONDOR")
+            mc_result = _mc_simulate_trade(
+                closes=closes,
+                highs=highs,
+                lows=lows,
+                i=i,
+                n_paths=monte_carlo,
+                hold_days_range=(2, 5),
+                slippage_pct=0.02,
+                profit_target=0.50,
+                stop_loss=1.00,
+                structure=structure,
+                rng=rng,
+            )
+
         # Run debaters
         opinions = []
         debater_dirs = {}
@@ -876,6 +1102,14 @@ def run_backtest(
             baseline_direction=bl_dir,
             iv_rank=ctx.get("iv_rank", 0.50),
             debater_trade_quality=debater_qualities,
+            # Monte Carlo fill simulation fields
+            mc_mean_return=mc_result.get("mean_return", 0.0),
+            mc_std_return=mc_result.get("std_return", 0.0),
+            mc_win_rate=mc_result.get("win_rate", 0.0),
+            mc_profit_target_hit_rate=mc_result.get("profit_target_hit_rate", 0.0),
+            mc_stop_loss_hit_rate=mc_result.get("stop_loss_hit_rate", 0.0),
+            mc_timeout_rate=mc_result.get("timeout_rate", 0.0),
+            mc_paths=mc_result.get("n_paths_run", 0),
         )
         all_results.append(result)
 
@@ -932,21 +1166,42 @@ def _compute_metrics(results: list[DayResult], months_back: int, tickers: list[s
     debater_names = list({k for r in results for k in r.debater_opinions})
 
     # Sharpe: trade $1 when consensus direction is non-neutral, sign × return
-    def _signed_returns(get_dir):
+    def _signed_returns(get_dir, use_mc=False):
         rets = []
         for r in results:
             d = get_dir(r)
+            # Use MC mean return if available and enabled, otherwise use next_day_return
+            base_return = r.mc_mean_return if (use_mc and r.mc_paths > 0) else r.next_day_return
             if d == "BULLISH":
-                rets.append(r.next_day_return)
+                rets.append(base_return)
             elif d == "BEARISH":
-                rets.append(-r.next_day_return)
+                rets.append(-base_return)
         return rets
 
-    v2_rets = _signed_returns(lambda r: r.consensus_direction)
-    bl_rets = _signed_returns(lambda r: r.baseline_direction)
+    v2_rets = _signed_returns(lambda r: r.consensus_direction, use_mc=False)
+    bl_rets = _signed_returns(lambda r: r.baseline_direction, use_mc=False)
 
     v2_sharpe = compute_sharpe(v2_rets)
     bl_sharpe = compute_sharpe(bl_rets)
+
+    # Compute MC Sharpe if MC paths were run
+    mc_sharpe = 0.0
+    mc_mean_win_rate = 0.0
+    mc_profit_target_hit_pct = 0.0
+    mc_stop_loss_hit_pct = 0.0
+    mc_timeout_pct = 0.0
+    mc_paths_per_day = 0
+
+    mc_days = [r for r in results if r.mc_paths > 0]
+    if mc_days:
+        mc_paths_per_day = mc_days[0].mc_paths  # all paths should be same count
+        mc_mean_win_rate = sum(r.mc_win_rate for r in mc_days) / len(mc_days) if mc_days else 0.0
+        mc_profit_target_hit_pct = sum(r.mc_profit_target_hit_rate for r in mc_days) / len(mc_days) if mc_days else 0.0
+        mc_stop_loss_hit_pct = sum(r.mc_stop_loss_hit_rate for r in mc_days) / len(mc_days) if mc_days else 0.0
+        mc_timeout_pct = sum(r.mc_timeout_rate for r in mc_days) / len(mc_days) if mc_days else 0.0
+        # Compute MC Sharpe using mc_mean_return
+        mc_v2_rets = _signed_returns(lambda r: r.consensus_direction, use_mc=True)
+        mc_sharpe = compute_sharpe(mc_v2_rets)
 
     f2 = f2_validation(results)
 
@@ -990,6 +1245,13 @@ def _compute_metrics(results: list[DayResult], months_back: int, tickers: list[s
         f2_validation=f2,
         cutover_ready=cutover_ready,
         cutover_reason=cutover_reason,
+        # Monte Carlo metrics
+        mc_paths_per_day=mc_paths_per_day,
+        mc_mean_win_rate=mc_mean_win_rate,
+        mc_profit_target_hit_pct=mc_profit_target_hit_pct,
+        mc_stop_loss_hit_pct=mc_stop_loss_hit_pct,
+        mc_timeout_pct=mc_timeout_pct,
+        mc_sharpe=mc_sharpe,
     )
 
 
@@ -1027,6 +1289,14 @@ def print_report(metrics: BacktestMetrics) -> None:
     print(f"  directional (trending):     {f2.get('directional_accuracy_in_trending', 0):.1%} [{_tick(f2.get('directional_passes'))}]")
     print(f"  volatility (trade_quality): {f2.get('volatility_trade_quality_accuracy', 0):.1%} [{_tick(f2.get('volatility_passes'))}]")
     print()
+    if metrics.mc_paths_per_day > 0:
+        print(f"Monte Carlo Fill Simulation (N={metrics.mc_paths_per_day} paths/day):")
+        print(f"  Win rate (mean across days):  {metrics.mc_mean_win_rate:.1%}")
+        print(f"  Exit via profit target:       {metrics.mc_profit_target_hit_pct:.1%}")
+        print(f"  Exit via stop loss:           {metrics.mc_stop_loss_hit_pct:.1%}")
+        print(f"  Held to full hold period:     {metrics.mc_timeout_pct:.1%}")
+        print(f"  MC Sharpe:  {metrics.mc_sharpe:+.3f}  (vs next-day Sharpe: {metrics.v2_sharpe:+.3f})")
+        print()
     print(f"Paper cutover gate: {'READY' if metrics.cutover_ready else 'NOT READY'}")
     print(f"  {metrics.cutover_reason}")
     print()
@@ -1049,7 +1319,7 @@ def save_report(metrics: BacktestMetrics, results: list[DayResult]) -> Path:
 
     # DayResult is not automatically serializable (dataclass)
     def _day_to_dict(r: DayResult) -> dict:
-        return {
+        result_dict = {
             "date": r.date, "ticker": r.ticker, "regime_id": r.regime_id,
             "regime_label": r.regime_label, "consensus_direction": r.consensus_direction,
             "consensus_score": r.consensus_score, "p_bull": r.p_bull,
@@ -1058,6 +1328,18 @@ def save_report(metrics: BacktestMetrics, results: list[DayResult]) -> Path:
             "debater_trade_quality": r.debater_trade_quality,
             "baseline_direction": r.baseline_direction, "iv_rank": r.iv_rank,
         }
+        # Include MC fields if populated
+        if r.mc_paths > 0:
+            result_dict.update({
+                "mc_mean_return": r.mc_mean_return,
+                "mc_std_return": r.mc_std_return,
+                "mc_win_rate": r.mc_win_rate,
+                "mc_profit_target_hit_rate": r.mc_profit_target_hit_rate,
+                "mc_stop_loss_hit_rate": r.mc_stop_loss_hit_rate,
+                "mc_timeout_rate": r.mc_timeout_rate,
+                "mc_paths": r.mc_paths,
+            })
+        return result_dict
 
     report = {
         "generated": datetime.datetime.now().isoformat(),
@@ -1089,10 +1371,11 @@ def main() -> None:
     parser.add_argument("--dynamic-deadband", action="store_true", help="Enable dynamic consensus dead-band")
     parser.add_argument("--simulated-flow", action="store_true", help="Simulate option flow and sentiment signals")
     parser.add_argument("--synthetic-chain", action="store_true", help="Inject synthetic options chain + trade structure for income/volatility debaters")
+    parser.add_argument("--monte-carlo", type=int, default=0, metavar="N", help="N Monte Carlo paths per signal day (0=off, typical=50)")
     args = parser.parse_args()
 
     if args.dry_run:
-        print(f"[dry-run] months={args.months}, tickers={args.tickers}, bandit={args.bandit}, decay={args.bandit_decay}, dynamic_deadband={args.dynamic_deadband}, simulated_flow={args.simulated_flow}, synthetic_chain={args.synthetic_chain}")
+        print(f"[dry-run] months={args.months}, tickers={args.tickers}, bandit={args.bandit}, decay={args.bandit_decay}, dynamic_deadband={args.dynamic_deadband}, simulated_flow={args.simulated_flow}, synthetic_chain={args.synthetic_chain}, monte_carlo={args.monte_carlo}")
         return
 
     results, metrics = run_backtest(
@@ -1104,6 +1387,7 @@ def main() -> None:
         dynamic_deadband=args.dynamic_deadband,
         simulated_flow=args.simulated_flow,
         synthetic_chain=args.synthetic_chain,
+        monte_carlo=args.monte_carlo,
     )
 
 

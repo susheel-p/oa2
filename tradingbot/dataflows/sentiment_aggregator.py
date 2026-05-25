@@ -12,17 +12,94 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
+import requests
+
 from tradingbot.core.schemas import SentimentSnapshot
 from tradingbot.dataflows.reddit_fetcher import fetch_reddit_sentiment
 from tradingbot.dataflows.stocktwits_fetcher import fetch_stocktwits_sentiment
 from tradingbot.dataflows.moomoo_news_fetcher import fetch_moomoo_news
 from tradingbot.dataflows.news import composite_sentiment  # yfinance scorer
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 logger = logging.getLogger(__name__)
+
+FINNHUB_API_KEY = os.getenv("FINHUB_API_KEY", "").strip()
 
 # Cache: {f"{ticker}_{timestamp_bucket}": SentimentSnapshot}
 _SENTIMENT_CACHE = {}
 _CACHE_TTL_MINUTES = 15
+
+# Bullish and bearish keywords for news sentiment scoring
+_BULLISH_KEYWORDS = {
+    "beat", "upgrade", "surge", "rally", "gain", "outperform", "strong", "bullish",
+    "upside", "positive", "growth", "expansion", "record", "milestone", "recovery",
+    "approval", "partnership", "acquisition", "deal", "success", "breakthrough"
+}
+_BEARISH_KEYWORDS = {
+    "miss", "downgrade", "plunge", "crash", "loss", "underperform", "weak", "bearish",
+    "downside", "negative", "decline", "contraction", "worst", "warning", "halt",
+    "decline", "lawsuit", "investigation", "recall", "bankruptcy", "risk"
+}
+
+
+async def fetch_finnhub_news_sentiment(ticker: str) -> tuple[float, list[str]]:
+    """Fetch news from Finnhub and score sentiment (-1 to +1).
+
+    Returns:
+        Tuple of (sentiment_score, catalyst_tags)
+    """
+    if not FINNHUB_API_KEY:
+        return 0.0, []
+
+    try:
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&limit=20&token={FINNHUB_API_KEY}"
+        resp = await asyncio.to_thread(requests.get, url, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not isinstance(data, list) or len(data) == 0:
+            return 0.0, []
+
+        # Score headlines with keyword matching
+        bullish_count = 0
+        bearish_count = 0
+        catalysts = []
+
+        for item in data[:10]:  # Check top 10 headlines
+            headline = (item.get("headline", "") + " " + item.get("summary", "")).lower()
+
+            # Count keyword matches
+            bull_matches = sum(1 for kw in _BULLISH_KEYWORDS if kw in headline)
+            bear_matches = sum(1 for kw in _BEARISH_KEYWORDS if kw in headline)
+
+            if bull_matches > bear_matches:
+                bullish_count += bull_matches
+            elif bear_matches > bull_matches:
+                bearish_count += bear_matches
+
+            # Extract catalyst tags
+            if bull_matches > 0 or bear_matches > 0:
+                source = item.get("source", "").upper()
+                headline_short = item.get("headline", "")[:50]
+                if headline_short and source:
+                    catalysts.append(f"{source}: {headline_short}")
+
+        # Convert to -1 to +1 score
+        total = bullish_count + bearish_count
+        if total == 0:
+            return 0.0, catalysts[:3]
+
+        score = (bullish_count - bearish_count) / (total + 1)
+        return float(score), catalysts[:3]
+
+    except Exception as e:
+        logger.debug(f"Finnhub news sentiment fetch failed for {ticker}: {e}")
+        return 0.0, []
 
 
 async def fetch_sentiment(
@@ -53,20 +130,11 @@ async def fetch_sentiment(
 
     # Fetch all sources in parallel
     try:
-        # yfinance news (already async-compatible via composite_sentiment)
-        yf_score = 0.0
-        yf_catalyst_tags = []
-        try:
-            # Note: composite_sentiment expects raw sentiment components
-            # For now, use 0 (will be overridden by other sources if yf doesn't return data)
-            yf_score = 0.0
-        except Exception as e:
-            logger.debug(f"yfinance sentiment failed: {e}")
-
-        # Parallel fetch: Reddit, StockTwits, moomoo
+        # Parallel fetch: Reddit, StockTwits, moomoo, Finnhub
         reddit_result = await asyncio.to_thread(fetch_reddit_sentiment, ticker, 50)
         stocktwits_result = await fetch_stocktwits_sentiment(ticker, 30)
         moomoo_result = await asyncio.to_thread(fetch_moomoo_news, ticker, 20)
+        yf_score, yf_catalyst_tags = await fetch_finnhub_news_sentiment(ticker)
 
         # Extract values with defaults
         reddit_bull_pct = reddit_result.get("bull_pct", 0.5)
@@ -75,6 +143,9 @@ async def fetch_sentiment(
         reddit_mentions = reddit_result.get("mention_count", 0)
         stocktwits_mentions = stocktwits_result.get("message_count", 0)
         moomoo_catalysts = moomoo_result.get("catalyst_tags", [])
+
+        # Merge catalysts from Finnhub and moomoo
+        all_catalysts = list(yf_catalyst_tags) + moomoo_catalysts
 
         # Sources that returned data
         data_sources = []
@@ -137,7 +208,7 @@ async def fetch_sentiment(
             composite_score=round(composite_score, 3),
             composite_label=label,
             mention_count=reddit_mentions + stocktwits_mentions,
-            catalyst_tags=moomoo_catalysts,
+            catalyst_tags=all_catalysts,
             data_sources=data_sources,
             fetched_at=now,
         )
