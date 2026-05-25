@@ -43,6 +43,7 @@ except Exception:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts import telegram_notify
+from tradingbot.core.market_hours import is_market_day
 
 
 TRADINGBOT_HOME = Path(os.getenv("TRADINGBOT_HOME", Path(__file__).parent.parent))
@@ -156,7 +157,10 @@ def _check_for_errors() -> int:
 
 
 def _should_send_8am_alert() -> bool:
-    """Check if we should send 8am health report (once per day)."""
+    """Check if we should send 8am health report (once per day, market days only)."""
+    if not is_market_day():
+        return False
+
     state = _load_state()
     last_8am = state.get("last_8am_alert")
     now = datetime.now()
@@ -169,7 +173,10 @@ def _should_send_8am_alert() -> bool:
 
 
 def _should_send_noon_check() -> bool:
-    """Check if we should send noon issue check (once per day)."""
+    """Check if we should send noon issue check (once per day, market days only)."""
+    if not is_market_day():
+        return False
+
     state = _load_state()
     last_noon = state.get("last_noon_check")
     now = datetime.now()
