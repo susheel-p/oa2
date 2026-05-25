@@ -119,14 +119,14 @@ def _get_news_summary(now: datetime.datetime) -> str:
 
         lines = ["Top market movers:"]
         # Get top 3 headlines
-        for i, item in enumerate(data[:3], 1):
+        for item in data[:3]:
             headline = item.get("headline", "").strip()
             source = item.get("source", "").upper()
             if headline:
                 # Truncate long headlines to ~60 chars
                 if len(headline) > 60:
                     headline = headline[:57] + "..."
-                lines.append(f"  {i}. {headline} ({source})")
+                lines.append(f"  • {headline} ({source})")
 
         return "\n".join(lines) if len(lines) > 1 else "Market news (fetch failed)"
 
