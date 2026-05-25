@@ -94,19 +94,42 @@ def _get_technicals(spy: float, spy_sma20: float, qqq: float, qqq_sma20: float) 
 
 
 def _get_news_summary(now: datetime.datetime) -> str:
-    """Top market news (placeholder; wire to Finnhub/NewsAPI)."""
+    """Top market news and potential movers (placeholder; wire to Finnhub/NewsAPI)."""
     # TODO: Integrate real news API (Finnhub free tier, NewsAPI, etc.)
-    return "Check news feed"
+    lines = [
+        "Key catalysts:",
+        "  • Check Fed calendar for speakers",
+        "  • Monitor earnings surprises pre/post-market",
+        "  • Watch geopolitical headlines",
+        "  • Track sector rotation signals",
+    ]
+    return "\n".join(lines)
 
 
 def _get_volatility_outlook(vix_close: float) -> str:
-    """Expected IV regime for the day."""
+    """Expected IV regime and trading implications for the day."""
     if vix_close < 14:
-        return "Low IV expected, good for defined-risk spreads"
+        lines = [
+            "Low IV regime — Spreads compressed",
+            "  • Good for defined-risk spreads (ICs, verticals)",
+            "  • Avoid naked short premium, wide stops",
+            "  • Expect mean-reversion trades to perform",
+        ]
     elif vix_close < 18:
-        return "Normal IV, balanced risk/reward"
+        lines = [
+            "Normal IV — Balanced risk/reward",
+            "  • Both directional and premium collection viable",
+            "  • Watch for surprise catalysts to spike IV",
+            "  • Standard position sizing applies",
+        ]
     else:
-        return "High IV expected, favor directional trades"
+        lines = [
+            "High IV — Elevated volatility expected",
+            "  • Favor directional trades over premium sales",
+            "  • Watch for volatility crush on event passes",
+            "  • Wider moves likely, use strict stops",
+        ]
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
