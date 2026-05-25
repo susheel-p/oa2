@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import datetime
+import os
 from zoneinfo import ZoneInfo
 
 import yfinance as yf
+import requests
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 ET = ZoneInfo("America/New_York")
+FINNHUB_API_KEY = os.getenv("FINHUB_API_KEY", "").strip()
 
 
 def get_market_summary() -> str:
@@ -94,16 +103,35 @@ def _get_technicals(spy: float, spy_sma20: float, qqq: float, qqq_sma20: float) 
 
 
 def _get_news_summary(now: datetime.datetime) -> str:
-    """Top market news and potential movers (placeholder; wire to Finnhub/NewsAPI)."""
-    # TODO: Integrate real news API (Finnhub free tier, NewsAPI, etc.)
-    lines = [
-        "Key catalysts:",
-        "  • Check Fed calendar for speakers",
-        "  • Monitor earnings surprises pre/post-market",
-        "  • Watch geopolitical headlines",
-        "  • Track sector rotation signals",
-    ]
-    return "\n".join(lines)
+    """Top market news from Finnhub (real headlines that can move markets)."""
+    if not FINNHUB_API_KEY:
+        return "Market news (API key not configured)"
+
+    try:
+        # Fetch general market news from Finnhub
+        url = f"https://finnhub.io/api/v1/news?category=general&minId=0&token={FINNHUB_API_KEY}"
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data or not isinstance(data, list) or len(data) == 0:
+            return "Market news (no recent headlines)"
+
+        lines = ["Top market movers:"]
+        # Get top 3 headlines
+        for i, item in enumerate(data[:3], 1):
+            headline = item.get("headline", "").strip()
+            source = item.get("source", "").upper()
+            if headline:
+                # Truncate long headlines to ~60 chars
+                if len(headline) > 60:
+                    headline = headline[:57] + "..."
+                lines.append(f"  {i}. {headline} ({source})")
+
+        return "\n".join(lines) if len(lines) > 1 else "Market news (fetch failed)"
+
+    except Exception as e:
+        return f"Market news (error: {type(e).__name__})"
 
 
 def _get_volatility_outlook(vix_close: float) -> str:
