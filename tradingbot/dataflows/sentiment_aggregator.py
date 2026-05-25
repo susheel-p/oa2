@@ -1,7 +1,8 @@
-"""Sentiment aggregator: combines Reddit, StockTwits, moomoo News, yfinance.
+"""Sentiment aggregator: combines Reddit, moomoo News, Finnhub news.
 
-Fetches sentiment from all 4 sources in parallel, computes weighted composite,
+Fetches sentiment from 3 sources in parallel, computes weighted composite,
 returns SentimentSnapshot. Caches results for 15 minutes.
+(StockTwits blocked all API access; disabled.)
 """
 
 from __future__ import annotations
@@ -57,7 +58,12 @@ async def fetch_finnhub_news_sentiment(ticker: str) -> tuple[float, list[str]]:
         return 0.0, []
 
     try:
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&limit=20&token={FINNHUB_API_KEY}"
+        # Company news endpoint requires date range (YYYY-MM-DD format)
+        now = datetime.utcnow()
+        to_date = now.strftime("%Y-%m-%d")
+        from_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={from_date}&to={to_date}&limit=20&token={FINNHUB_API_KEY}"
         resp = await asyncio.to_thread(requests.get, url, timeout=5)
         resp.raise_for_status()
         data = resp.json()
@@ -130,11 +136,12 @@ async def fetch_sentiment(
 
     # Fetch all sources in parallel
     try:
-        # Parallel fetch: Reddit, StockTwits, moomoo, Finnhub
+        # Parallel fetch: Reddit, moomoo, Finnhub
+        # Note: StockTwits blocked all API access (403 on all endpoints)
         reddit_result = await asyncio.to_thread(fetch_reddit_sentiment, ticker, 50)
-        stocktwits_result = await fetch_stocktwits_sentiment(ticker, 30)
         moomoo_result = await asyncio.to_thread(fetch_moomoo_news, ticker, 20)
         yf_score, yf_catalyst_tags = await fetch_finnhub_news_sentiment(ticker)
+        stocktwits_result = {}  # StockTwits API blocked
 
         # Extract values with defaults
         reddit_bull_pct = reddit_result.get("bull_pct", 0.5)
@@ -159,14 +166,15 @@ async def fetch_sentiment(
             data_sources.append("yfinance")
 
         # Composite score (weighted average of available sources)
-        # Weights favor StockTwits (options traders) over Reddit (general retail)
-        # yfinance=0.15 (only explains 40% IV variance), moomoo=0.30 (news catalysts),
-        # stocktwits=0.35 (options traders), reddit=0.20 (broader but noisier)
+        # Weights: Finnhub (news sentiment) + moomoo (news catalysts) + Reddit (retail)
+        # NOTE: StockTwits blocked all API access (403 on all endpoints), reassigned weight to Finnhub
+        # yfinance/finnhub=0.35 (news-driven sentiment), moomoo=0.30 (news catalysts),
+        # reddit=0.35 (broader retail sentiment)
         weights = {
-            "yfinance": 0.15,
+            "yfinance": 0.35,  # Increased from 0.15 (StockTwits blocked)
             "moomoo": 0.30,
-            "reddit": 0.20,
-            "stocktwits": 0.35,
+            "reddit": 0.35,
+            "stocktwits": 0.0,  # Blocked
         }
 
         available_weight = sum(weights[s] for s in data_sources)
