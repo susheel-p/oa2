@@ -43,6 +43,7 @@ except Exception:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts import telegram_notify
+from scripts.market_summary import get_market_summary
 from tradingbot.core.market_hours import is_market_day
 
 
@@ -188,8 +189,24 @@ def _should_send_noon_check() -> bool:
     return False
 
 
+def _send_market_summary(state: dict) -> None:
+    """Send 8am market summary with economic calendar, sentiment, technicals, news, volatility."""
+    try:
+        summary = get_market_summary()
+        if telegram_notify.notify_market_summary(summary):
+            _log("[OK] Market summary sent")
+        else:
+            _log("[WARN] Market summary failed to send")
+    except Exception as e:
+        _log(f"[WARN] Market summary error: {e}")
+
+
 def _send_8am_alert(state: dict) -> None:
-    """Send 8am system health report."""
+    """Send 8am market summary and system health report."""
+    # Send market summary first
+    _send_market_summary(state)
+
+    # Then send system health
     age = _get_heartbeat_age()
     daemon_status = "running" if age is not None and age <= STALE_SECONDS else "stale"
     signals = _count_signals_generated()

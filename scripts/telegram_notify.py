@@ -142,6 +142,11 @@ def notify_summary(summary: dict) -> bool:
     return send(text)
 
 
+def notify_market_summary(market_summary: str) -> bool:
+    """Send 8am daily market summary with economic calendar, sentiment, technicals, news, volatility."""
+    return send(market_summary)
+
+
 def notify_system_health(
     daemon_status: str,
     signals_generated: int,
