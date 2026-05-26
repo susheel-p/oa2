@@ -403,7 +403,7 @@ def _run_entry_only(account_size: float, tickers: list[str], dry_run: bool) -> N
     results: list[dict] = []
     log_path = LOG_DIR / f"paper_trade_{today}.jsonl"
 
-    with open(log_path, "a") as log_file:
+    with open(log_path, "w") as log_file:
         for ticker in eligible_tickers:
             try:
                 result = _scan_ticker(ticker, book, monitor, account_size)
@@ -598,13 +598,13 @@ def _scan_ticker(
 # Daily summary
 # =============================================================================
 
-def _build_summary(results: list[dict], account_size: float, book: GreeksBook) -> dict:
+def _build_summary(results: list[dict], account_size: float, book: GreeksBook, monitor: PositionMonitor | None = None) -> dict:
     approved = [r for r in results if r.get("status") == "sized_approved"]
     rejected = [r for r in results if r.get("status") == "sized_rejected"]
     errors   = [r for r in results if r.get("status") == "error"]
     exit_alerts = [a for r in results for a in r.get("exit_alerts", [])]
 
-    return {
+    summary = {
         "date": _today_str(),
         "run_ts": _ts(),
         "account_size": account_size,
@@ -618,6 +618,24 @@ def _build_summary(results: list[dict], account_size: float, book: GreeksBook) -
         "book_state": book.summary(),
         "errors": [{"ticker": r["ticker"], "error": r["error"]} for r in errors],
     }
+
+    # Add open positions summary
+    if monitor is not None:
+        positions = monitor.all_positions()
+        summary["open_positions"] = [
+            {
+                "ticker": pos.ticker,
+                "structure": pos.structure,
+                "contracts": pos.contracts,
+                "current_pnl": pos.current_pnl,
+                "current_dte": pos.current_dte,
+            }
+            for pos in positions if pos.current_pnl != 0 or pos.contracts > 0
+        ]
+    else:
+        summary["open_positions"] = []
+
+    return summary
 
 
 # =============================================================================
@@ -677,7 +695,7 @@ def _run_premarket_scan(account_size: float, tickers: list[str] | None, dry_run:
             else:
                 _log(f"    [PM] {status}")
 
-    summary = _build_summary(results, account_size, book)
+    summary = _build_summary(results, account_size, book, monitor)
     summary["scan_type"] = "premarket"
     summary_path = LOG_DIR / f"summary_{today}_premarket.json"
     if not dry_run:
@@ -689,10 +707,21 @@ def _run_premarket_scan(account_size: float, tickers: list[str] | None, dry_run:
 
     if telegram_notify:
         try:
-            msg = (
-                f"Premarket scan complete — {today}\n"
-                f"Scanned: {len(results)} | Approved: {len(approved)} | Rejected: {len(rejected)}"
-            )
+            msg_lines = [
+                f"Premarket scan complete — {today}",
+                f"Scanned: {len(results)} | Approved: {len(approved)} | Rejected: {len(rejected)}",
+            ]
+
+            # Add open positions
+            positions = monitor.all_positions()
+            if positions:
+                msg_lines.append("\nOpen Positions:")
+                for pos in positions:
+                    msg_lines.append(f"  {pos.ticker}: {pos.contracts} contracts, P&L ${pos.current_pnl:+.2f}, {pos.current_dte} DTE")
+            else:
+                msg_lines.append("\nOpen Positions: None")
+
+            msg = "\n".join(msg_lines)
             telegram_notify.send(msg)
         except Exception:
             pass
@@ -795,7 +824,7 @@ def main() -> None:
     log_path = LOG_DIR / f"paper_trade_{today}.jsonl"
     MAX_TICKER_TIME = 300  # 5 min per ticker max before timeout
 
-    with open(log_path, "a") as log_file:
+    with open(log_path, "w") as log_file:
         for ticker in tickers:
             _log(f"  Scanning {ticker} ...")
             start_time = time.time()
@@ -1003,7 +1032,7 @@ def main() -> None:
     monitor.save(positions_path)
 
     # ── Build and write daily summary ─────────────────────────────────────────
-    summary = _build_summary(results, account_size, book)
+    summary = _build_summary(results, account_size, book, monitor)
     summary_path = LOG_DIR / f"summary_{today}.json"
     summary_path.write_text(json.dumps(summary, indent=2))
 
