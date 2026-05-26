@@ -67,8 +67,18 @@ from tradingbot.sizing.limits import GreeksBook
 from tradingbot.watchlist.builder import WATCHLIST
 
 ET = ZoneInfo("America/New_York")
-LOG_DIR = Path("logs")
-LOG_DIR.mkdir(exist_ok=True)
+
+
+def _get_base_dir() -> Path:
+    """Get base directory, respecting TRADINGBOT_HOME override."""
+    env_home = os.getenv("TRADINGBOT_HOME")
+    if env_home:
+        return Path(env_home)
+    return Path(__file__).parent.parent
+
+
+LOG_DIR = _get_base_dir() / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # =============================================================================
