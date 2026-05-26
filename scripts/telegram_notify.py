@@ -132,13 +132,29 @@ def notify_exit(ticker: str, alert: dict) -> bool:
 
 
 def notify_summary(summary: dict) -> bool:
-    text = (
-        "Trading run complete\n"
-        f"Approved: {summary.get('approved_count', 0)}\n"
-        f"Rejected: {summary.get('rejected_count', 0)}\n"
-        f"Errors: {summary.get('error_count', 0)}\n"
-        f"Exit alerts: {summary.get('exit_alert_count', 0)}"
-    )
+    lines = [
+        "Trading run complete",
+        f"Approved: {summary.get('approved_count', 0)}",
+        f"Rejected: {summary.get('rejected_count', 0)}",
+        f"Errors: {summary.get('error_count', 0)}",
+        f"Exit alerts: {summary.get('exit_alert_count', 0)}",
+    ]
+
+    # Add open positions summary
+    positions = summary.get("open_positions", [])
+    if positions:
+        lines.append("\nOpen Positions:")
+        for pos in positions:
+            ticker = pos.get("ticker", "?")
+            contracts = pos.get("contracts", 0)
+            pnl = pos.get("current_pnl", 0)
+            dte = pos.get("current_dte", 0)
+            structure = pos.get("structure", "?")
+            lines.append(f"  {ticker}: {contracts} contracts, P&L ${pnl:+.2f}, {dte} DTE ({structure})")
+    else:
+        lines.append("\nOpen Positions: None")
+
+    text = "\n".join(lines)
     return send(text)
 
 
