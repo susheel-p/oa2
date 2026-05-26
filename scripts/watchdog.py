@@ -166,10 +166,14 @@ def _should_send_8am_alert() -> bool:
     last_8am = state.get("last_8am_alert")
     now = datetime.now()
 
-    # Check if we're near 8am (within 1 hour) and haven't sent yet today
-    if now.hour == 8:
-        if last_8am is None or not last_8am.startswith(now.strftime("%Y-%m-%d")):
-            return True
+    # Check if we're during or past 8am (8:00-8:59) and haven't sent yet today
+    if now.hour == 8 and (last_8am is None or not last_8am.startswith(now.strftime("%Y-%m-%d"))):
+        return True
+
+    # Catch-up: if we missed the 8am window (now is 9-11:59) and haven't sent today
+    if 9 <= now.hour < 12 and (last_8am is None or not last_8am.startswith(now.strftime("%Y-%m-%d"))):
+        return True
+
     return False
 
 
@@ -182,10 +186,14 @@ def _should_send_noon_check() -> bool:
     last_noon = state.get("last_noon_check")
     now = datetime.now()
 
-    # Check if we're near noon (hour 12, within 1 hour) and haven't sent yet today
-    if now.hour == 12:
-        if last_noon is None or not last_noon.startswith(now.strftime("%Y-%m-%d")):
-            return True
+    # Check if we're during or past noon (12:00-12:59) and haven't sent yet today
+    if now.hour == 12 and (last_noon is None or not last_noon.startswith(now.strftime("%Y-%m-%d"))):
+        return True
+
+    # Catch-up: if we missed the noon window (now is 13-16:14) and haven't sent today
+    if 13 <= now.hour < 16 and (last_noon is None or not last_noon.startswith(now.strftime("%Y-%m-%d"))):
+        return True
+
     return False
 
 

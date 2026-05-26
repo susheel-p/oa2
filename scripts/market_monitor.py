@@ -242,7 +242,7 @@ class MarketMonitor:
 
     def _run_exit_only(self) -> None:
         """Run exit-only if market is open."""
-        if not _is_market_open():
+        if not is_market_open():
             return
 
         cmd = self._build_cmd("exit-only")
@@ -250,7 +250,7 @@ class MarketMonitor:
 
     def _run_entry_only(self) -> None:
         """Run entry-only if market is open (scan for new positions)."""
-        if not _is_market_open():
+        if not is_market_open():
             return
 
         cmd = self._build_cmd("entry-only")
@@ -408,6 +408,51 @@ class MarketMonitor:
                 self._reset_daily_flags()
                 last_daily_reset = now.date()
 
+            # Catch-up for missed scheduled events on market days (if we wake up past the target time)
+            if is_market_day(now):
+                # Catch-up: premarket scan (target 8:30 AM) — run if past 8:30 and before premarket report (9:00)
+                if not self.premarket_scan_done_today and now.hour == 8 and now.minute >= 30:
+                    _log("Catch-up: running premarket scan (missed 8:30 AM window)", self.log_file)
+                    self._run_premarket_scan()
+                elif not self.premarket_scan_done_today and now.hour == 9 and now.minute < 35:
+                    _log("Catch-up: running premarket scan (missed 8:30 AM window)", self.log_file)
+                    self._run_premarket_scan()
+
+                # Catch-up: premarket report (target 9:00 AM) — run if past 9:00 and before full-scan (9:35)
+                if not self.premarket_done_today and now.hour == 9 and now.minute < 35:
+                    _log("Catch-up: running premarket report (missed 9:00 AM window)", self.log_file)
+                    self._run_premarket_report()
+
+                # Catch-up: full-scan (target 9:35 AM) — run if past 9:35 and before market close
+                if not self.full_scan_done_today and now.hour >= 9 and now.minute >= 35 and now.hour < 16:
+                    _log("Catch-up: running full-scan (missed 9:35 AM window)", self.log_file)
+                    self._run_full_scan()
+                elif not self.full_scan_done_today and now.hour >= 10 and now.hour < 16:
+                    _log("Catch-up: running full-scan (missed 9:35 AM window)", self.log_file)
+                    self._run_full_scan()
+
+                # Catch-up: postmarket report (target 4:15 PM) — run if past 4:15 PM and before learning loop (5:00)
+                if not self.postmarket_done_today and now.hour >= 16 and now.hour < 17:
+                    if now.hour == 16 and now.minute >= 15:
+                        _log("Catch-up: running postmarket report (missed 4:15 PM window)", self.log_file)
+                        self._run_postmarket_report()
+
+                # Catch-up: learning loop (target 5:00 PM) — run if past 5:00 PM and before midnight
+                if not self.learning_loop_done_today and now.hour >= 17 and now.hour < 23:
+                    _log("Catch-up: running learning loop (missed 5:00 PM window)", self.log_file)
+                    self._run_learning_loop()
+
+            # Check for weekly analysis at 5:30 PM on Sunday (before other weekly checks)
+            if (
+                now.weekday() == 6  # Sunday
+                and now.hour >= 17
+                and now.minute >= 30
+                and not self.weekly_analysis_done_today
+            ):
+                _log("Running weekly analysis (Sunday 5:30 PM)", self.log_file)
+                self._run_weekly_analysis()
+
+            # Exact time matching (as backup for systems that can check at precise times)
             # Run premarket scan at 8:30 AM (fresh signals using live premarket prices)
             if (
                 now.hour == 8
