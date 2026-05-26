@@ -1,9 +1,10 @@
 """oa2 market monitor daemon.
 
 Fully automated trading system with scheduled operations:
-  - 8:30 AM:  Premarket report (today's plan based on yesterday's signals)
-  - 9:35 AM:  Full-scan (debaters → consensus → sizing → save positions)
-  - 9:30 AM–4:00 PM: Exit-only every minute (monitor & close positions)
+  - 8:00 AM:  Premarket scan (45-min window using premarket prices)
+  - 8:45 AM:  Premarket report (today's signal overview)
+  - 9:00 AM:  Full-scan (debaters → consensus → sizing → approved positions, MUST finish by 9:30)
+  - 9:30 AM–4:00 PM: Entry-only + exit-only every minute (ready with approved positions)
   - 4:15 PM:  Postmarket report (day's results & analysis)
 
 Runs continuously as a daemon (auto-restart on crash, runs across midnight).
@@ -141,7 +142,7 @@ def _time_until_next_event(target_hour: int, target_minute: int) -> float:
 
 _TIMEOUTS = {
     "FULL-SCAN": 1800,           # 30 min — debaters + chain fetch for 22 tickers
-    "PREMARKET-SCAN": 1800,      # 30 min — same pipeline, no broker submission
+    "PREMARKET-SCAN": 2700,      # 45 min — same pipeline, runs 8:00-8:45 AM with buffer
     "PREMARKET-REPORT": 600,     # 10 min
     "POSTMARKET-REPORT": 600,    # 10 min
     "EXIT-ONLY": 120,            # 2 min — must fit inside the 60s scheduler tick
@@ -373,8 +374,9 @@ class MarketMonitor:
         if not self.once and is_market_day():
             now = _now_et()
             today = now.date()
-            premarket_scan_target = now.replace(hour=8, minute=30, second=0, microsecond=0)
-            premarket_target = now.replace(hour=9, minute=0, second=0, microsecond=0)
+            premarket_scan_target = now.replace(hour=8, minute=0, second=0, microsecond=0)
+            premarket_target = now.replace(hour=8, minute=45, second=0, microsecond=0)
+            fullscan_target = now.replace(hour=9, minute=0, second=0, microsecond=0)
             postmarket_target = now.replace(hour=16, minute=15, second=0, microsecond=0)
             learning_target = now.replace(hour=17, minute=0, second=0, microsecond=0)
 
@@ -410,25 +412,28 @@ class MarketMonitor:
 
             # Catch-up for missed scheduled events on market days (if we wake up past the target time)
             if is_market_day(now):
-                # Catch-up: premarket scan (target 8:30 AM) — run if past 8:30 and before premarket report (9:00)
-                if not self.premarket_scan_done_today and now.hour == 8 and now.minute >= 30:
-                    _log("Catch-up: running premarket scan (missed 8:30 AM window)", self.log_file)
+                # Catch-up: premarket scan (target 8:00 AM) — run if past 8:00 and before premarket report (8:45)
+                if not self.premarket_scan_done_today and now.hour == 8 and now.minute >= 0:
+                    _log("Catch-up: running premarket scan (missed 8:00 AM window)", self.log_file)
                     self._run_premarket_scan()
-                elif not self.premarket_scan_done_today and now.hour == 9 and now.minute < 35:
-                    _log("Catch-up: running premarket scan (missed 8:30 AM window)", self.log_file)
+                elif not self.premarket_scan_done_today and now.hour == 8 and now.minute < 45:
+                    _log("Catch-up: running premarket scan (missed 8:00 AM window)", self.log_file)
                     self._run_premarket_scan()
 
-                # Catch-up: premarket report (target 9:00 AM) — run if past 9:00 and before full-scan (9:35)
-                if not self.premarket_done_today and now.hour == 9 and now.minute < 35:
-                    _log("Catch-up: running premarket report (missed 9:00 AM window)", self.log_file)
+                # Catch-up: premarket report (target 8:45 AM) — run if past 8:45 and before full-scan (9:00)
+                if not self.premarket_done_today and now.hour == 8 and now.minute >= 45:
+                    _log("Catch-up: running premarket report (missed 8:45 AM window)", self.log_file)
+                    self._run_premarket_report()
+                elif not self.premarket_done_today and now.hour == 9 and now.minute < 0:
+                    _log("Catch-up: running premarket report (missed 8:45 AM window)", self.log_file)
                     self._run_premarket_report()
 
-                # Catch-up: full-scan (target 9:35 AM) — run if past 9:35 and before market close
-                if not self.full_scan_done_today and now.hour >= 9 and now.minute >= 35 and now.hour < 16:
-                    _log("Catch-up: running full-scan (missed 9:35 AM window)", self.log_file)
+                # Catch-up: full-scan (target 9:00 AM) — run if past 9:00 and before market close
+                if not self.full_scan_done_today and now.hour >= 9 and now.hour < 16:
+                    _log("Catch-up: running full-scan (missed 9:00 AM window)", self.log_file)
                     self._run_full_scan()
                 elif not self.full_scan_done_today and now.hour >= 10 and now.hour < 16:
-                    _log("Catch-up: running full-scan (missed 9:35 AM window)", self.log_file)
+                    _log("Catch-up: running full-scan (missed 9:00 AM window)", self.log_file)
                     self._run_full_scan()
 
                 # Catch-up: postmarket report (target 4:15 PM) — run if past 4:15 PM and before learning loop (5:00)
@@ -453,26 +458,26 @@ class MarketMonitor:
                 self._run_weekly_analysis()
 
             # Exact time matching (as backup for systems that can check at precise times)
-            # Run premarket scan at 8:30 AM (fresh signals using live premarket prices)
+            # Run premarket scan at 8:00 AM (fresh signals using live premarket prices, 45-min window)
             if (
                 now.hour == 8
-                and now.minute == 30
+                and now.minute == 0
                 and is_market_day(now)
             ):
                 self._run_premarket_scan()
 
-            # Generate premarket report at 9:00 AM (reads today's premarket scan)
+            # Generate premarket report at 8:45 AM (reads premarket scan results)
             if (
-                now.hour == 9
-                and now.minute == 0
+                now.hour == 8
+                and now.minute == 45
                 and is_market_day(now)
             ):
                 self._run_premarket_report()
 
-            # Check for full-scan at 9:35 AM
+            # Full-scan at 9:00 AM (generate approved trades BEFORE market opens at 9:30)
             if (
                 now.hour == 9
-                and now.minute == 35
+                and now.minute == 0
                 and is_market_day(now)
             ):
                 self._run_full_scan()
@@ -642,9 +647,10 @@ def _print_setup_instructions() -> None:
 ========================================================================
 
 This system runs FULLY AUTOMATED:
-  * 8:30 AM:  Premarket report (today's trading plan)
-  * 9:35 AM:  Full scan (enter trades)
-  * Every 1 min (9:30 AM–4:00 PM): Monitor exits
+  * 8:00 AM:  Premarket scan (signal analysis)
+  * 8:45 AM:  Premarket report (today's signal overview)
+  * 9:00 AM:  Full scan (approved trades READY before market opens)
+  * 9:30 AM:  Market opens — Entry-only + exit-only every minute
   * 4:15 PM:  Postmarket report (day's results)
 
 Once started, the daemon runs continuously across midnight.
