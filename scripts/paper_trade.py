@@ -632,7 +632,7 @@ def _build_summary(results: list[dict], account_size: float, book: GreeksBook, m
                 "current_pnl": pos.current_pnl,
                 "current_dte": pos.current_dte,
             }
-            for pos in positions if pos.current_pnl != 0 or pos.contracts > 0
+            for pos in positions
         ]
     else:
         summary["open_positions"] = []
