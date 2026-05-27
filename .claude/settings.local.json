@@ -6,7 +6,10 @@
       "Bash(git add *)",
       "Bash(git commit -m 'chore: clean up old oa2 directories and cache files *)",
       "PowerShell($calibPath = \"$env:USERPROFILE\\\\.tradingbot\\\\calibration\\\\p_bull_calibrator.json\"; Get-Content $calibPath | ConvertFrom-Json | ConvertTo-Json -Depth 10)",
-      "Bash(docker exec *)"
+      "Bash(docker exec *)",
+      "PowerShell(ls \"C:\\\\Users\\\\pamed\\\\Susheel\\\\oa2-new\\\\tradingbot\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName)",
+      "Bash(find /mnt/c/Users/pamed/Susheel/oa2-new/cache -type f 2>/dev/null | head -20)",
+      "Read(//mnt/c/Users/pamed/Susheel/oa2-new/**)"
     ]
   }
 }

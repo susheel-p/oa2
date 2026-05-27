@@ -119,39 +119,47 @@ def _recommend_expiry(chains_by_expiry: Dict[str, Dict[str, Any]]) -> str | None
     """
     from tradingbot.dataflows.expiry_flow import classify_expiry_flow, ExpiryBucket
 
+    # Never enter an option expiring in the current calendar week (Mon–Sun).
+    # Buying same-week expiry means holding into expiration with no room to exit.
+    today = datetime.now().date()
+    days_until_sunday = (6 - today.weekday()) % 7
+    end_of_current_week = today + timedelta(days=days_until_sunday if days_until_sunday > 0 else 7)
+
     if not chains_by_expiry:
-        # Fallback: return next Friday
-        base = datetime.now()
-        days_ahead = 4 - base.weekday()
+        # Fallback: first Friday strictly after end_of_current_week
+        days_ahead = 4 - today.weekday()
         if days_ahead <= 0:
             days_ahead += 7
-        return (base + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+        candidate = today + timedelta(days=days_ahead)
+        if candidate <= end_of_current_week:
+            candidate += timedelta(days=7)
+        return candidate.strftime("%Y-%m-%d")
 
     # Analyze flow across all expirations
     flow_profile = classify_expiry_flow(chains_by_expiry)
 
+    # Filter out same-week and already-expired dates before bucket selection.
+    candidate_expiries = [
+        e for e in sorted(chains_by_expiry.keys())
+        if datetime.strptime(e, "%Y-%m-%d").date() > end_of_current_week
+    ]
+
+    if not candidate_expiries:
+        return None
+
     # Map dominant bucket to expiration index
     dominant = flow_profile.dominant_bucket
-    candidate_expiries = sorted(chains_by_expiry.keys())
 
     if dominant == ExpiryBucket.FRONT_WEEK.value:
-        if len(candidate_expiries) >= 1:
-            return candidate_expiries[0]
-    elif dominant == ExpiryBucket.NEAR_TERM.value:
-        if len(candidate_expiries) >= 2:
-            return candidate_expiries[1]
-    elif dominant == ExpiryBucket.MID_TERM.value:
-        if len(candidate_expiries) >= 3:
-            return candidate_expiries[2]
-    elif dominant == ExpiryBucket.LONGER.value:
-        if len(candidate_expiries) >= 4:
-            return candidate_expiries[-1]
-
-    # Fallback: return nearest available expiry
-    if candidate_expiries:
         return candidate_expiries[0]
+    elif dominant == ExpiryBucket.NEAR_TERM.value:
+        return candidate_expiries[1] if len(candidate_expiries) >= 2 else candidate_expiries[0]
+    elif dominant == ExpiryBucket.MID_TERM.value:
+        return candidate_expiries[2] if len(candidate_expiries) >= 3 else candidate_expiries[-1]
+    elif dominant == ExpiryBucket.LONGER.value:
+        return candidate_expiries[-1]
 
-    return None
+    return candidate_expiries[0]
 
 
 # ── Quote Context (market data) ────────────────────────────────────────────
