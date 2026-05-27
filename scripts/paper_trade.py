@@ -546,6 +546,7 @@ def _scan_ticker(
     book: GreeksBook,
     monitor: PositionMonitor,
     account_size: float,
+    premarket_mode: bool = False,
 ) -> dict:
     """Run the full pipeline for one ticker. Never raises — errors are caught."""
     start = time.time()
@@ -565,6 +566,7 @@ def _scan_ticker(
             account_size=account_size,
             book=book,
             monitor=monitor,
+            premarket_mode=premarket_mode,
         )
         result["status"] = ctx.decision.get("status", "unknown") if ctx.decision else "unknown"
         result["decision"] = ctx.decision
@@ -681,19 +683,16 @@ def _run_premarket_scan(account_size: float, tickers: list[str] | None, dry_run:
     with open(log_path, "w") as log_file:
         for ticker in tickers:
             _log(f"  Scanning {ticker} ...")
-            result = _scan_ticker(ticker, book, monitor, account_size)
+            result = _scan_ticker(ticker, book, monitor, account_size, premarket_mode=True)
             results.append(result)
             log_file.write(json.dumps(result, default=str) + "\n")
             log_file.flush()
 
-            status = result["status"]
-            if status == "sized_approved":
-                _log(f"    [PM] APPROVED (no broker order — premarket scan only)")
-            elif status == "sized_rejected":
-                reason = (result.get("decision") or {}).get("sizing_reject_reason", "?")
-                _log(f"    [PM] REJECTED: {reason}")
-            else:
-                _log(f"    [PM] {status}")
+            consensus = result.get("consensus") or {}
+            direction = consensus.get("direction", "NEUTRAL")
+            p_bull = consensus.get("p_bull")
+            p_str = f" p={p_bull:.2f}" if p_bull is not None else ""
+            _log(f"    [PM] {direction}{p_str}")
 
     summary = _build_summary(results, account_size, book, monitor)
     summary["scan_type"] = "premarket"
@@ -701,18 +700,34 @@ def _run_premarket_scan(account_size: float, tickers: list[str] | None, dry_run:
     if not dry_run:
         summary_path.write_text(json.dumps(summary, indent=2, default=str))
 
-    approved = [r for r in results if r.get("status") == "sized_approved"]
-    rejected = [r for r in results if r.get("status") == "sized_rejected"]
-    _log(f"Premarket scan done: {len(approved)} approved, {len(rejected)} rejected → {log_path}")
+    bullish = [r for r in results if (r.get("consensus") or {}).get("direction") == "BULLISH"]
+    bearish = [r for r in results if (r.get("consensus") or {}).get("direction") == "BEARISH"]
+    neutral = [r for r in results if (r.get("consensus") or {}).get("direction") not in ("BULLISH", "BEARISH")]
+    _log(f"Premarket scan done: {len(bullish)} bullish, {len(bearish)} bearish, {len(neutral)} neutral → {log_path}")
 
     if telegram_notify:
         try:
             msg_lines = [
-                f"Premarket scan complete — {today}",
-                f"Scanned: {len(results)} | Approved: {len(approved)} | Rejected: {len(rejected)}",
+                f"Premarket signals — {today}",
+                f"Scanned: {len(results)} | Bull: {len(bullish)} | Bear: {len(bearish)} | Neutral: {len(neutral)}",
             ]
 
-            # Add open positions
+            if bullish:
+                msg_lines.append("\nBullish:")
+                for r in bullish:
+                    c = r.get("consensus") or {}
+                    p = c.get("p_bull")
+                    p_str = f" p={p:.2f}" if p is not None else ""
+                    msg_lines.append(f"  {r['ticker']}{p_str}")
+
+            if bearish:
+                msg_lines.append("\nBearish:")
+                for r in bearish:
+                    c = r.get("consensus") or {}
+                    p = c.get("p_bull")
+                    p_str = f" p={p:.2f}" if p is not None else ""
+                    msg_lines.append(f"  {r['ticker']}{p_str}")
+
             positions = monitor.all_positions()
             if positions:
                 msg_lines.append("\nOpen Positions:")
@@ -769,7 +784,9 @@ def main() -> None:
 
     if args.premarket_scan:
         _run_premarket_scan(account_size=args.account_size, tickers=args.tickers, dry_run=args.dry_run)
-        return
+        from tradingbot.dataflows.moomoo_data import close_quote_context
+        close_quote_context()
+        sys.exit(0)
 
     tickers = args.tickers if args.tickers else WATCHLIST
     account_size = args.account_size

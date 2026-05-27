@@ -73,6 +73,7 @@ def run(
     clock: Clock | None = None,
     chain_provider: ChainProvider | None = None,
     calibrator: Calibrator | None = None,
+    premarket_mode: bool = False,
 ) -> PipelineContext:
     """End-to-end pipeline for one ticker.
 
@@ -316,7 +317,12 @@ def run(
 
     # ------------------------------------------------------------------
     # L5b — structure picker: pick real strikes from chain, compute R:R
+    # Skipped in premarket_mode — options chains have no live bid/ask before open
     # ------------------------------------------------------------------
+    if premarket_mode:
+        ctx.decision = _build_decision(ctx, ticker)
+        return ctx
+
     if ctx.consensus is not None and ctx.consensus.direction.value in ("BULLISH", "BEARISH"):
         try:
             from tradingbot.strategy import pick_structure

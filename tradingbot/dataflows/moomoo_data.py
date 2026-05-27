@@ -86,13 +86,15 @@ def _compute_expiry_dates(as_of: datetime | None = None) -> list[str]:
     three_fri = next_fri + timedelta(days=14)
     expirations.append(three_fri.strftime("%Y-%m-%d"))
 
-    # 4. 6-week (mid-term)
+    # 4. 6-week (mid-term) — snap to next Friday so yfinance can find the expiry
     six_week = base + timedelta(days=42)
-    expirations.append(six_week.strftime("%Y-%m-%d"))
+    six_week_fri_offset = (4 - six_week.weekday()) % 7
+    expirations.append((six_week + timedelta(days=six_week_fri_offset)).strftime("%Y-%m-%d"))
 
-    # 5. 10-week (longer-dated)
+    # 5. 10-week (longer-dated) — snap to next Friday so yfinance can find the expiry
     ten_week = base + timedelta(days=70)
-    expirations.append(ten_week.strftime("%Y-%m-%d"))
+    ten_week_fri_offset = (4 - ten_week.weekday()) % 7
+    expirations.append((ten_week + timedelta(days=ten_week_fri_offset)).strftime("%Y-%m-%d"))
 
     return sorted(expirations)
 
@@ -454,13 +456,15 @@ def fetch_options_chain(
                         puts.append(contract)
 
                 if calls or puts:
-                    # Check if we have actual data (not all zeros)
-                    # If moomoo returned structure but no prices, fall through to yfinance
+                    # Accept moomoo data if any contract has OI > 0 (always populated)
+                    # or live bid/iv/delta. Premarket bids are 0 but OI is real.
                     has_real_data = any(
-                        c.get("bid", 0) > 0 or c.get("iv", 0) > 0 or c.get("delta", 0) != 0
+                        c.get("open_interest", 0) > 0 or c.get("bid", 0) > 0
+                        or c.get("iv", 0) > 0 or c.get("delta", 0) != 0
                         for c in calls
                     ) or any(
-                        p.get("bid", 0) > 0 or p.get("iv", 0) > 0 or p.get("delta", 0) != 0
+                        p.get("open_interest", 0) > 0 or p.get("bid", 0) > 0
+                        or p.get("iv", 0) > 0 or p.get("delta", 0) != 0
                         for p in puts
                     )
 
@@ -471,7 +475,11 @@ def fetch_options_chain(
                             "atm_strike": current_price,
                         }
 
-        # Fallback to yfinance if moomoo unavailable or returned empty
+        # Fallback to yfinance only when moomoo SDK is not installed
+        if MOOMOO_AVAILABLE:
+            warnings.warn(f"moomoo options chain returned no usable data for {ticker} expiry {expiration}")
+            return {"calls": [], "puts": [], "atm_strike": 0}
+
         try:
             import yfinance as yf
         except ImportError:
