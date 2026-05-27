@@ -231,7 +231,7 @@ class MarketMonitor:
         now = _now_et()
         _log(
             f"Full-scan trigger at {now.strftime('%H:%M:%S')} "
-            f"(target 09:35:00)",
+            f"(target 09:45:00)",
             self.log_file
         )
 
@@ -420,20 +420,17 @@ class MarketMonitor:
                     _log("Catch-up: running premarket scan (missed 8:00 AM window)", self.log_file)
                     self._run_premarket_scan()
 
-                # Catch-up: premarket report (target 8:45 AM) — run if past 8:45 and before full-scan (9:00)
+                # Catch-up: premarket report (target 8:45 AM) — run if past 8:45 and before full-scan (9:45)
                 if not self.premarket_done_today and now.hour == 8 and now.minute >= 45:
                     _log("Catch-up: running premarket report (missed 8:45 AM window)", self.log_file)
                     self._run_premarket_report()
-                elif not self.premarket_done_today and now.hour == 9 and now.minute < 0:
+                elif not self.premarket_done_today and now.hour == 9 and now.minute < 45:
                     _log("Catch-up: running premarket report (missed 8:45 AM window)", self.log_file)
                     self._run_premarket_report()
 
-                # Catch-up: full-scan (target 9:00 AM) — run if past 9:00 and before market close
-                if not self.full_scan_done_today and now.hour >= 9 and now.hour < 16:
-                    _log("Catch-up: running full-scan (missed 9:00 AM window)", self.log_file)
-                    self._run_full_scan()
-                elif not self.full_scan_done_today and now.hour >= 10 and now.hour < 16:
-                    _log("Catch-up: running full-scan (missed 9:00 AM window)", self.log_file)
+                # Catch-up: full-scan (target 9:45 AM) — run if past 9:45 and before market close
+                if not self.full_scan_done_today and (now.hour > 9 or (now.hour == 9 and now.minute >= 45)) and now.hour < 16:
+                    _log("Catch-up: running full-scan (missed 9:45 AM window)", self.log_file)
                     self._run_full_scan()
 
                 # Catch-up: postmarket report (target 4:15 PM) — run if past 4:15 PM and before learning loop (5:00)
@@ -474,10 +471,10 @@ class MarketMonitor:
             ):
                 self._run_premarket_report()
 
-            # Full-scan at 9:00 AM (generate approved trades BEFORE market opens at 9:30)
+            # Full-scan at 9:45 AM (live options chains available after open)
             if (
                 now.hour == 9
-                and now.minute == 0
+                and now.minute == 45
                 and is_market_day(now)
             ):
                 self._run_full_scan()
