@@ -43,6 +43,15 @@ def load(ticker: str, date: str) -> Optional[dict]:
         if date < today:
             return data
 
+        # Reject cache entries that have no chain data (written during a broken fetch)
+        has_chains = bool(
+            data.get("chains_by_expiry")
+            or data.get("_options_chain", {}).get("calls")
+            or data.get("calls_count", 0) > 0
+        )
+        if not has_chains and data.get("data_source") != "error":
+            return None
+
         # Today's data: refresh every 15 minutes
         if cached_date == today and cached_time:
             try:
@@ -173,5 +182,19 @@ def fetch_with_cache(ticker: str, date: str) -> dict:
         ctx.setdefault("sentiment_score", 0.0)
         ctx.setdefault("sentiment_label", "neutral")
 
-    save(ticker, date, ctx)
+    # Only cache if we got real chain data — empty chains would poison subsequent runs
+    # within the 15-minute TTL window.
+    has_chains = bool(
+        ctx.get("chains_by_expiry")
+        or ctx.get("_options_chain", {}).get("calls")
+        or ctx.get("calls_count", 0) > 0
+    )
+    if has_chains or ctx.get("data_source") == "error":
+        # Always cache errors too so we don't hammer a broken feed on every call
+        save(ticker, date, ctx)
+    else:
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "[cache:%s] skipping cache write — no chain data fetched (will retry next call)", ticker
+        )
     return ctx

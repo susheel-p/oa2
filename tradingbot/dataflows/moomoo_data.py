@@ -414,159 +414,138 @@ def fetch_options_chain(
                 option_type=ft.OptionType.ALL
             )
 
-            if ret == RET_OK and data is not None and not (hasattr(data, 'empty') and data.empty):
-                # Get current price from moomoo
+            logger.debug("[chain:%s] get_option_chain ret=%s expiry=%s", ticker, ret, expiration)
+
+            if ret != RET_OK:
+                logger.warning("[chain:%s] get_option_chain FAILED ret=%s expiry=%s", ticker, ret, expiration)
+            elif data is None or (hasattr(data, 'empty') and data.empty):
+                logger.warning("[chain:%s] get_option_chain returned EMPTY dataframe expiry=%s", ticker, expiration)
+            else:
+                # get_option_chain returns metadata only (code, strike_price, option_type).
+                # Fetch live bid/ask/Greeks via get_market_snapshot on the option codes.
                 quote = fetch_quote(ticker)
                 current_price = quote.get("last_price", 0)
 
-                calls = []
-                puts = []
-
+                # Build strike/type lookup from chain metadata
+                meta = {}
                 for _, row in data.iterrows():
-                    strike = float(row.get("strike_price", 0))
-                    if strike_range:
-                        min_s, max_s = strike_range
-                        if strike < min_s or strike > max_s:
-                            continue
-
-                    # Normalize IV (handle both decimal and percentage formats)
-                    iv = float(row.get("implied_volatility", 0))
-                    if iv > 1.0:  # Percentage format
-                        iv = iv / 100.0
-
-                    contract = {
-                        "strike": strike,
-                        "bid": float(row.get("bid_price", 0)),
-                        "ask": float(row.get("ask_price", 0)),
-                        "bid_size": float(row.get("bid_vol", 0)),
-                        "ask_size": float(row.get("ask_vol", 0)),
-                        "volume": float(row.get("vol", 0)),
-                        "open_interest": float(row.get("net_open_interest", 0)),
-                        "iv": iv,
-                        "delta": float(row.get("delta", 0)),
-                        "gamma": float(row.get("gamma", 0)),
-                        "theta": float(row.get("theta", 0)),
-                        "vega": float(row.get("vega", 0)),
-                    }
-
-                    option_type = str(row.get("option_type", "")).upper()
-                    if option_type == "CALL":
-                        calls.append(contract)
-                    elif option_type == "PUT":
-                        puts.append(contract)
-
-                if calls or puts:
-                    # Accept moomoo data if any contract has OI > 0 (always populated)
-                    # or live bid/iv/delta. Premarket bids are 0 but OI is real.
-                    has_real_data = any(
-                        c.get("open_interest", 0) > 0 or c.get("bid", 0) > 0
-                        or c.get("iv", 0) > 0 or c.get("delta", 0) != 0
-                        for c in calls
-                    ) or any(
-                        p.get("open_interest", 0) > 0 or p.get("bid", 0) > 0
-                        or p.get("iv", 0) > 0 or p.get("delta", 0) != 0
-                        for p in puts
-                    )
-
-                    if has_real_data:
-                        return {
-                            "calls": sorted(calls, key=lambda x: x["strike"]),
-                            "puts": sorted(puts, key=lambda x: x["strike"]),
-                            "atm_strike": current_price,
+                    c = str(row.get("code", ""))
+                    if c:
+                        meta[c] = {
+                            "strike": float(row.get("strike_price", 0)),
+                            "option_type": str(row.get("option_type", "")).upper(),
                         }
 
-        # Fallback to yfinance only when moomoo SDK is not installed
+                logger.debug("[chain:%s] chain metadata: %d codes (cols=%s)", ticker, len(meta), list(data.columns))
+
+                if not meta:
+                    logger.warning("[chain:%s] no option codes extracted from chain rows; raw sample: %s",
+                                   ticker, data.head(2).to_dict("records") if not data.empty else "empty")
+                else:
+                    # Fetch snapshots in batches of 100 (moomoo per-call limit)
+                    all_codes = list(meta.keys())
+                    snap_rows: dict[str, Any] = {}
+                    batch_size = 100
+                    for i in range(0, len(all_codes), batch_size):
+                        batch = all_codes[i : i + batch_size]
+                        s_ret, s_data = ctx.get_market_snapshot(batch)
+                        logger.debug("[chain:%s] snapshot batch %d-%d ret=%s rows=%s",
+                                     ticker, i, i + len(batch), s_ret,
+                                     len(s_data) if s_data is not None and not s_data.empty else 0)
+                        if s_ret == RET_OK and s_data is not None and not s_data.empty:
+                            for _, srow in s_data.iterrows():
+                                snap_rows[str(srow.get("code", ""))] = srow.to_dict()
+                        else:
+                            logger.warning("[chain:%s] snapshot batch %d-%d FAILED ret=%s sample_codes=%s",
+                                           ticker, i, i + len(batch), s_ret, batch[:3])
+
+                    logger.debug("[chain:%s] snapshots returned: %d / %d codes populated",
+                                 ticker, len(snap_rows), len(all_codes))
+
+                    calls = []
+                    puts = []
+                    skipped_no_snap = 0
+
+                    for c, m in meta.items():
+                        strike = m["strike"]
+                        if strike_range:
+                            min_s, max_s = strike_range
+                            if strike < min_s or strike > max_s:
+                                continue
+
+                        snap = snap_rows.get(c, {})
+                        if not snap:
+                            skipped_no_snap += 1
+
+                        def _f(val, default=0.0):
+                            try:
+                                return float(val) if val not in (None, "", "N/A") else default
+                            except (TypeError, ValueError):
+                                return default
+
+                        iv = _f(snap.get("option_implied_volatility"))
+                        if iv > 1.0:
+                            iv = iv / 100.0
+
+                        contract = {
+                            "strike": strike,
+                            "bid": _f(snap.get("bid_price")),
+                            "ask": _f(snap.get("ask_price")),
+                            "bid_size": _f(snap.get("bid_vol")),
+                            "ask_size": _f(snap.get("ask_vol")),
+                            "volume": _f(snap.get("volume")),
+                            "open_interest": _f(snap.get("option_open_interest")) or _f(snap.get("option_net_open_interest")),
+                            "iv": iv,
+                            "delta": _f(snap.get("option_delta")),
+                            "gamma": _f(snap.get("option_gamma")),
+                            "theta": _f(snap.get("option_theta")),
+                            "vega": _f(snap.get("option_vega")),
+                        }
+
+                        if m["option_type"] == "CALL":
+                            calls.append(contract)
+                        elif m["option_type"] == "PUT":
+                            puts.append(contract)
+
+                    logger.debug("[chain:%s] contracts built: calls=%d puts=%d skipped_no_snap=%d",
+                                 ticker, len(calls), len(puts), skipped_no_snap)
+
+                    if not calls and not puts:
+                        logger.warning("[chain:%s] zero contracts after building; meta=%d snap_rows=%d strike_range=%s",
+                                       ticker, len(meta), len(snap_rows), strike_range)
+                    else:
+                        has_real_data = any(
+                            c.get("open_interest", 0) > 0 or c.get("bid", 0) > 0
+                            or c.get("iv", 0) > 0 or c.get("delta", 0) != 0
+                            for c in calls
+                        ) or any(
+                            p.get("open_interest", 0) > 0 or p.get("bid", 0) > 0
+                            or p.get("iv", 0) > 0 or p.get("delta", 0) != 0
+                            for p in puts
+                        )
+
+                        if not has_real_data:
+                            sample = (calls[:2] if calls else []) + (puts[:2] if puts else [])
+                            logger.warning("[chain:%s] has_real_data=False — all greeks/OI/bid are zero. sample=%s",
+                                           ticker, sample)
+                        else:
+                            return {
+                                "calls": sorted(calls, key=lambda x: x["strike"]),
+                                "puts": sorted(puts, key=lambda x: x["strike"]),
+                                "atm_strike": current_price,
+                            }
+
+        # No yfinance fallback — moomoo is our data source
         if MOOMOO_AVAILABLE:
-            warnings.warn(f"moomoo options chain returned no usable data for {ticker} expiry {expiration}")
+            logger.error("[chain:%s] moomoo returned no usable chain for expiry=%s — returning empty. "
+                         "Check DEBUG logs above for the exact failure point.", ticker, expiration)
             return {"calls": [], "puts": [], "atm_strike": 0}
 
-        try:
-            import yfinance as yf
-        except ImportError:
-            warnings.warn("yfinance not installed. Cannot fetch options chain.")
-            return {"calls": [], "puts": [], "atm_strike": 0}
-
-        ticker_obj = yf.Ticker(ticker)
-        try:
-            opts = ticker_obj.option_chain(expiration)
-        except Exception as e:
-            warnings.warn(f"yfinance options fetch failed for {ticker}: {e}")
-            return {"calls": [], "puts": [], "atm_strike": 0}
-
-        calls_df = opts.calls
-        puts_df = opts.puts
-
-        # Get current price from moomoo if possible
-        quote = fetch_quote(ticker)
-        current_price = quote.get("last_price", 0)
-
-        calls = []
-        puts = []
-
-        for _, row in calls_df.iterrows():
-            strike = float(row["strike"])
-            if strike_range:
-                min_s, max_s = strike_range
-                if strike < min_s or strike > max_s:
-                    continue
-
-            # Normalize IV
-            iv = float(row.get("impliedVolatility", 0))
-            if iv > 1.0:
-                iv = iv / 100.0
-
-            contract = {
-                "strike": strike,
-                "bid": float(row.get("bid", 0)),
-                "ask": float(row.get("ask", 0)),
-                "bid_size": float(row.get("bid_size", 0)),
-                "ask_size": float(row.get("ask_size", 0)),
-                "volume": float(row.get("volume", 0)),
-                "open_interest": float(row.get("openInterest", 0)),
-                "iv": iv,
-                "delta": float(row.get("delta", 0)),
-                "gamma": float(row.get("gamma", 0)),
-                "theta": float(row.get("theta", 0)),
-                "vega": float(row.get("vega", 0)),
-            }
-            calls.append(contract)
-
-        for _, row in puts_df.iterrows():
-            strike = float(row["strike"])
-            if strike_range:
-                min_s, max_s = strike_range
-                if strike < min_s or strike > max_s:
-                    continue
-
-            # Normalize IV
-            iv = float(row.get("impliedVolatility", 0))
-            if iv > 1.0:
-                iv = iv / 100.0
-
-            contract = {
-                "strike": strike,
-                "bid": float(row.get("bid", 0)),
-                "ask": float(row.get("ask", 0)),
-                "bid_size": float(row.get("bid_size", 0)),
-                "ask_size": float(row.get("ask_size", 0)),
-                "volume": float(row.get("volume", 0)),
-                "open_interest": float(row.get("openInterest", 0)),
-                "iv": iv,
-                "delta": float(row.get("delta", 0)),
-                "gamma": float(row.get("gamma", 0)),
-                "theta": float(row.get("theta", 0)),
-                "vega": float(row.get("vega", 0)),
-            }
-            puts.append(contract)
-
-        return {
-            "calls": sorted(calls, key=lambda x: x["strike"]),
-            "puts": sorted(puts, key=lambda x: x["strike"]),
-            "atm_strike": current_price,
-        }
+        logger.error("[chain:%s] moomoo SDK not available — cannot fetch options chain", ticker)
+        return {"calls": [], "puts": [], "atm_strike": 0}
 
     except Exception as e:
-        warnings.warn(f"Error fetching options chain for {ticker}: {e}")
+        logger.exception("[chain:%s] unexpected error fetching options chain expiry=%s: %s", ticker, expiration, e)
         return {"calls": [], "puts": [], "atm_strike": 0}
 
 
