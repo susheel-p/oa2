@@ -29,6 +29,7 @@ Chain format (per cache/<TICKER>_<DATE>.json):
 
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -143,6 +144,8 @@ def _pick_debit_vertical(
     spot: float,
     is_bullish: bool,
     required_odds: float,
+    expiry: str | None = None,
+    dte: int = DEFAULT_DTE,
 ) -> StructurePick | None:
     """Build a debit vertical (long lower / short higher for call; mirrored for put).
 
@@ -199,8 +202,8 @@ def _pick_debit_vertical(
             structure_type=structure,
             long_strike=long_strike,
             short_strike=short_strike,
-            expiry=None,
-            dte=DEFAULT_DTE,
+            expiry=expiry,
+            dte=dte,
             max_profit=round(max_profit, 2),
             max_loss=round(max_loss, 2),
             breakeven=round(breakeven, 2),
@@ -232,6 +235,8 @@ def _pick_outright(
     spot: float,
     is_bullish: bool,
     p_bull: float,
+    expiry: str | None = None,
+    dte: int = DEFAULT_DTE,
 ) -> StructurePick | None:
     """Pick a near-the-money long option as a fallback when no vertical is viable."""
     if (p_bull if is_bullish else 1.0 - p_bull) < OUTRIGHT_MIN_P_BULL:
@@ -261,8 +266,8 @@ def _pick_outright(
         structure_type=structure,
         long_strike=strike,
         short_strike=None,
-        expiry=None,
-        dte=DEFAULT_DTE,
+        expiry=expiry,
+        dte=dte,
         max_profit=round(max_profit, 2),
         max_loss=round(max_loss, 2),
         breakeven=round(breakeven, 2),
@@ -286,6 +291,7 @@ def pick_structure(
     direction: str,
     p_bull: float,
     iv_rank: float | None = None,
+    expiry: str | None = None,
 ) -> StructurePick | None:
     """Pick an options structure that maximises Kelly viability.
 
@@ -295,6 +301,7 @@ def pick_structure(
         direction: "BULLISH" | "BEARISH" | "NEUTRAL".
         p_bull: calibrated probability of bullish from consensus.
         iv_rank: 0..100, optional — currently unused (reserved for structure choice).
+        expiry: ISO date string (YYYY-MM-DD) of the selected expiration; used to compute real DTE.
 
     Returns:
         StructurePick or None if no liquid + Kelly-viable structure exists.
@@ -311,10 +318,19 @@ def pick_structure(
     is_bullish = direction == "BULLISH"
     required_odds = _required_odds(p_bull, direction)
 
+    # Compute real DTE from expiry date if provided
+    dte = DEFAULT_DTE
+    if expiry:
+        try:
+            exp_date = datetime.date.fromisoformat(expiry)
+            dte = max(0, (exp_date - datetime.date.today()).days)
+        except ValueError:
+            pass
+
     # 1) Try debit vertical first (defined risk + favorable odds for our conviction range)
-    pick = _pick_debit_vertical(legs, spot, is_bullish, required_odds)
+    pick = _pick_debit_vertical(legs, spot, is_bullish, required_odds, expiry=expiry, dte=dte)
     if pick is not None:
         return pick
 
     # 2) Outright long only when conviction is high enough to justify fat-tail risk
-    return _pick_outright(legs, spot, is_bullish, p_bull)
+    return _pick_outright(legs, spot, is_bullish, p_bull, expiry=expiry, dte=dte)

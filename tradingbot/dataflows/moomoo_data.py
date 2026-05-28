@@ -140,10 +140,13 @@ def _recommend_expiry(chains_by_expiry: Dict[str, Dict[str, Any]]) -> str | None
     # Analyze flow across all expirations
     flow_profile = classify_expiry_flow(chains_by_expiry)
 
-    # Filter out same-week and already-expired dates before bucket selection.
+    # Filter: must expire strictly after this week AND at least 14 days out.
+    # This prevents entering options that are already near the DTE_EMERGENCY exit threshold.
+    min_entry_date = today + timedelta(days=14)
     candidate_expiries = [
         e for e in sorted(chains_by_expiry.keys())
         if datetime.strptime(e, "%Y-%m-%d").date() > end_of_current_week
+        and datetime.strptime(e, "%Y-%m-%d").date() >= min_entry_date
     ]
 
     if not candidate_expiries:

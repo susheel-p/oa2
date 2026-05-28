@@ -348,6 +348,7 @@ def run(
                 direction=ctx.consensus.direction.value,
                 p_bull=ctx.consensus.p_bull,
                 iv_rank=iv_rank,
+                expiry=recommended_expiry,
             )
             if pick is not None:
                 ctx.market_data["max_profit"] = pick.max_profit
