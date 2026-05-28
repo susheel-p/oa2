@@ -14,6 +14,8 @@ Install: pip install futu-openapi ta pandas numpy
 from __future__ import annotations
 
 import os
+import socket
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 import warnings
@@ -167,20 +169,35 @@ def _recommend_expiry(chains_by_expiry: Dict[str, Dict[str, Any]]) -> str | None
 _quote_ctx = None
 _subscribed_codes = set()
 
+_OPEND_CONNECT_TIMEOUT = int(os.getenv("MOOMOO_CONNECT_TIMEOUT", "15"))
+_OPEND_SNAPSHOT_TIMEOUT = int(os.getenv("MOOMOO_SNAPSHOT_TIMEOUT", "30"))
+
+
+def _check_opend_reachable(host: str, port: int, timeout: int = 3) -> bool:
+    """Return True if OpenD TCP port is reachable within timeout seconds."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def _get_quote_context():
     """Lazy-load quote context (requires OpenD running on localhost:11111)."""
     global _quote_ctx
     if _quote_ctx is None:
         if not MOOMOO_AVAILABLE:
             raise ImportError("moomoo SDK not installed. Run: pip install moomoo-api")
+        host = os.getenv("MOOMOO_OPEND_HOST", "127.0.0.1")
+        port = int(os.getenv("MOOMOO_OPEND_PORT", 11111))
+        if not _check_opend_reachable(host, port):
+            raise ConnectionRefusedError(
+                f"OpenD not reachable at {host}:{port} — is the moomoo app running with OpenD enabled?"
+            )
         try:
-            host = os.getenv("MOOMOO_OPEND_HOST", "127.0.0.1")
-            port = int(os.getenv("MOOMOO_OPEND_PORT", 11111))
-            _quote_ctx = ft.OpenQuoteContext(host=host, port=port)
+            _quote_ctx = ft.OpenQuoteContext(host=host, port=port, conn_timeout=_OPEND_CONNECT_TIMEOUT)
         except Exception as e:
-            host = os.getenv("MOOMOO_OPEND_HOST", "127.0.0.1")
-            port = os.getenv("MOOMOO_OPEND_PORT", 11111)
-            raise Exception(f"Failed to connect to OpenD server at {host}:{port}. Ensure moomoo app is running and OpenD is enabled. Error: {e}")
+            raise Exception(f"Failed to connect to OpenD at {host}:{port}: {e}") from e
         import atexit
         atexit.register(close_quote_context)
     return _quote_ctx
@@ -413,14 +430,25 @@ def fetch_options_chain(
             # Subscribe to options data
             _ensure_subscribed(code, [ft.SubType.QUOTE])
 
-            # Fetch options chain with correct parameters
-            ret, data = ctx.get_option_chain(
-                code,
-                index_option_type=ft.IndexOptionType.NORMAL,
-                start=expiration,
-                end=expiration,
-                option_type=ft.OptionType.ALL
-            )
+            # Fetch options chain with correct parameters.
+            # Run in a thread so a hung OpenD call doesn't stall the whole scan.
+            with ThreadPoolExecutor(max_workers=1) as _pool:
+                _fut = _pool.submit(
+                    ctx.get_option_chain,
+                    code,
+                    index_option_type=ft.IndexOptionType.NORMAL,
+                    start=expiration,
+                    end=expiration,
+                    option_type=ft.OptionType.ALL,
+                )
+                try:
+                    ret, data = _fut.result(timeout=_OPEND_SNAPSHOT_TIMEOUT)
+                except FuturesTimeoutError:
+                    logger.warning(
+                        "[chain:%s] get_option_chain TIMED OUT after %ds expiry=%s",
+                        ticker, _OPEND_SNAPSHOT_TIMEOUT, expiration,
+                    )
+                    ret, data = -1, None
 
             logger.debug("[chain:%s] get_option_chain ret=%s expiry=%s", ticker, ret, expiration)
 
@@ -450,22 +478,33 @@ def fetch_options_chain(
                     logger.warning("[chain:%s] no option codes extracted from chain rows; raw sample: %s",
                                    ticker, data.head(2).to_dict("records") if not data.empty else "empty")
                 else:
-                    # Fetch snapshots in batches of 100 (moomoo per-call limit)
+                    # Fetch snapshots in batches of 100 (moomoo per-call limit).
+                    # Each batch runs in a thread so we can enforce a hard timeout
+                    # and avoid blocking the scan indefinitely on a slow OpenD.
                     all_codes = list(meta.keys())
                     snap_rows: dict[str, Any] = {}
                     batch_size = 100
-                    for i in range(0, len(all_codes), batch_size):
-                        batch = all_codes[i : i + batch_size]
-                        s_ret, s_data = ctx.get_market_snapshot(batch)
-                        logger.debug("[chain:%s] snapshot batch %d-%d ret=%s rows=%s",
-                                     ticker, i, i + len(batch), s_ret,
-                                     len(s_data) if s_data is not None and not s_data.empty else 0)
-                        if s_ret == RET_OK and s_data is not None and not s_data.empty:
-                            for _, srow in s_data.iterrows():
-                                snap_rows[str(srow.get("code", ""))] = srow.to_dict()
-                        else:
-                            logger.warning("[chain:%s] snapshot batch %d-%d FAILED ret=%s sample_codes=%s",
-                                           ticker, i, i + len(batch), s_ret, batch[:3])
+                    with ThreadPoolExecutor(max_workers=1) as _pool:
+                        for i in range(0, len(all_codes), batch_size):
+                            batch = all_codes[i : i + batch_size]
+                            future = _pool.submit(ctx.get_market_snapshot, batch)
+                            try:
+                                s_ret, s_data = future.result(timeout=_OPEND_SNAPSHOT_TIMEOUT)
+                            except FuturesTimeoutError:
+                                logger.warning(
+                                    "[chain:%s] snapshot batch %d-%d TIMED OUT after %ds — skipping batch",
+                                    ticker, i, i + len(batch), _OPEND_SNAPSHOT_TIMEOUT,
+                                )
+                                continue
+                            logger.debug("[chain:%s] snapshot batch %d-%d ret=%s rows=%s",
+                                         ticker, i, i + len(batch), s_ret,
+                                         len(s_data) if s_data is not None and not s_data.empty else 0)
+                            if s_ret == RET_OK and s_data is not None and not s_data.empty:
+                                for _, srow in s_data.iterrows():
+                                    snap_rows[str(srow.get("code", ""))] = srow.to_dict()
+                            else:
+                                logger.warning("[chain:%s] snapshot batch %d-%d FAILED ret=%s sample_codes=%s",
+                                               ticker, i, i + len(batch), s_ret, batch[:3])
 
                     logger.debug("[chain:%s] snapshots returned: %d / %d codes populated",
                                  ticker, len(snap_rows), len(all_codes))
