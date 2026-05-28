@@ -1,304 +1,122 @@
 # tradingbot Production Roadmap
 
-## Production Readiness Assessment
-
-All phases A–F complete. System is ready for supervised paper trading.
-
-**Hard gate status:**
-1. Phase A complete: honest debaters, live EWMA correlation, warm bandit posteriors
-2. Phase B complete: sizing engine — Kelly + Greeks caps + CVaR pass before every trade
-3. Phase C complete: exit engine running on all open positions
-4. Phase F complete: v2 Sharpe >= v1 baseline on 90-day backtest window
-
-**Remaining gate:** 2 weeks of shadow mode with no sizing/exit rule breaches before
-enabling unsupervised paper trading.
+All phases complete. System is in paper trading validation.
 
 ---
 
-## Phase A — Signal Integrity [COMPLETE]
+## Current Status
 
-Goal: make sure every signal the system emits is honest and statistically grounded.
+| Phase | Goal | Status |
+|-------|------|--------|
+| 0 | Scaffold + data adapters + 22-ticker watchlist | Done |
+| 1 | 5 debaters (directional/income/vol/flow/sentiment) | Done |
+| 2 | 8-bucket regime classifier (vol × trend) | Done |
+| 3 | GLS consensus engine + EWMA covariance | Done |
+| 4 | Thompson bandit (regime-indexed) | Done |
+| 5 | Dealer positioning agent (6th debater) | Done |
+| A | Honest debaters + live correlation + bandit warm-start | Done |
+| B | Kelly sizing engine + Greeks caps + CVaR stress | Done |
+| C | Exit engine + position monitor + roll logic | Done |
+| D | Regime enhancements (session, crisis leads, GEX walls) | Done |
+| E | Real flow data (pluggable adapter registry) | Done |
+| F | Backtesting harness + A/B vs v1 baseline | Done |
 
-### A1 — Flow Debater: Honest Abstention [DONE]
-
-**Fix:** `tradingbot/debaters/flow.py` — added `_has_real_flow_data()` guard requiring
-`flow_data["data_quality"] == "real"`. Returns `conviction=0.0, direction=NEUTRAL`
-when no real tape data available. No more PCR derived from chain delta.
-
-### A2 — Bandit Warm-Start from Historical Replay [DONE]
-
-**Fix:** `scripts/bandit_warmstart.py` — full 6-month yfinance replay, scores
-next-day direction hits per (debater, regime), updates Beta posteriors.
-Usage: `python scripts/bandit_warmstart.py [--months 6] [--dry-run] [--verbose]`
-
-### A3 — EWMA Correlation Matrix [DONE]
-
-**Fix:** `tradingbot/consensus/covariance.py` — rolling EWMA (λ=0.94, min 20 obs).
-`tradingbot/consensus/engine.py` — `_compute_correlation_matrix()` now instance method,
-uses live EWMA when tracker is warm, falls back to `_fixed_correlation()`.
-Feature flag: `TRADINGBOT_FLAG_EWMA_CORR` (default on).
+**Next:** 2-week paper trading validation → live cutover. See [PAPER_TRADING.md](PAPER_TRADING.md).
 
 ---
 
-## Phase B — Sizing Engine (tradingbot/sizing/) [COMPLETE]
+## Phase A — Signal Integrity [DONE]
 
-Gate: required before any paper or live trading begins. No trade executes without sizing.
+**What it fixed:** Debaters were fabricating signals when data was unavailable.
 
-### B1 — Fractional Kelly per Trade
-
-Formula: `f* = (edge × odds - (1 - edge)) / odds × kelly_fraction`
-where:
-- `edge` = consensus p_bull (or 1 - p_bull for bearish) from consensus engine
-- `odds` = max_profit / max_loss from ChainSnapshot
-- `kelly_fraction` = 0.25 (quarter-Kelly; conservative for options)
-
-Output: contract count recommendation, bounded by B2 hard caps.
-
-**File:** `tradingbot/sizing/kelly.py`
-
-### B2 — Book-Level Greeks Hard Caps
-
-Track running book Greeks across all open positions:
-- `max_net_delta`: ±0.30 of account (e.g., ±$300 per $1000 account)
-- `max_net_vega`: ±$50/1% IV move
-- `max_net_theta`: no single-day theta > 2% of account
-- `max_single_underlying_pct`: no more than 25% of vega/delta in one name
-
-Any proposed trade that would breach a cap is hard-rejected by the pipeline, regardless
-of consensus direction or conviction.
-
-**File:** `tradingbot/sizing/limits.py`
-
-### B3 — CVaR Scenario Check
-
-Five stress scenarios before trade approval:
-1. Underlying -3% intraday
-2. Underlying -5% intraday
-3. VIX +10 points (IV spike)
-4. VIX +20 points (crisis spike)
-5. Correlation spike: all positions move adversely simultaneously
-
-If any scenario produces a P&L breach > configured threshold (default: 5% of account),
-the trade is rejected or size is reduced to fit within the CVaR budget.
-
-**File:** `tradingbot/sizing/cvar.py`
-
-### B4 — DTE-Aware Sizing
-
-DTE is a first-class variable in sizing:
-- DTE 0-2: long-gamma only; size at 50% of Kelly (gamma risk)
-- DTE 3-6: normal Kelly; tight stop rules
-- DTE 7-21: full Kelly; standard rules
-- DTE 22-45: full Kelly; appropriate for premium selling
-- DTE 46+: reduce to 75% Kelly (calendar/diagonal plays; more uncertain P&L path)
-
-Short positions approaching DTE < 2: mandatory size reduction and exit evaluation.
-
-**File:** `tradingbot/sizing/kelly.py` (DTE parameter)
+- **A1 — Flow debater honest abstention** — `conviction=0.0` when no real tape data (`data_quality != "real"`). File: `tradingbot/debaters/flow.py`
+- **A2 — Bandit warm-start** — 6-month yfinance replay seeds Thompson Beta posteriors before going live. File: `scripts/bandit_warmstart.py`
+- **A3 — EWMA correlation** — Live λ=0.94 rolling correlation matrix in consensus engine (min 20 obs, falls back to fixed). Files: `tradingbot/consensus/covariance.py`, `tradingbot/consensus/engine.py`
 
 ---
 
-## Phase C — Exit Engine (tradingbot/execution/) [COMPLETE]
+## Phase B — Sizing Engine [DONE]
 
-Gate: required for unattended paper trading. Without exits, every open position
-is a risk that grows over time.
+**What it does:** No trade executes without passing three independent sizing gates.
 
-### C1 — Position Monitor
-
-Module that maintains a registry of open positions and their current mark-to-market.
-Polls at configurable intervals (default: every 5 minutes during market hours).
-For each position: current P&L vs target, DTE, current regime, and current consensus.
-
-**File:** `tradingbot/execution/monitor.py`
-
-### C2 — Exit Rules Engine
-
-Rules evaluated in priority order for each open position:
-
-1. **Hard stop**: current loss >= max_loss_dollars → market order close, log ExitReason.STOP_LOSS
-2. **Profit target**: current gain >= 50% of max_profit for short premium → close, PROFIT_TARGET
-3. **DTE emergency**: DTE < 2 on any short leg → close, TIME_STOP (avoid assignment)
-4. **Time stop**: position held > time_stop_days from entry → evaluate close, TIME_STOP
-5. **Hard EOD**: 3:55 PM ET → force close all intraday positions, HARD_EOD_CUTOFF
-6. **Regime flip**: current regime ≠ entry regime → re-run consensus; if direction flips → close
-
-**File:** `tradingbot/execution/exit.py`
-
-### C3 — Roll Logic
-
-When a short position is: profitable (> 25% max profit), DTE < 14, and regime unchanged:
-evaluate rolling to the next expiration vs closing. Roll if:
-- Next expiry has sufficient premium to justify transaction costs
-- Rolling does not increase Greek exposure beyond limits
-- Regime forecast supports continued premium collection
-
-**File:** `tradingbot/execution/roll.py`
+- **B1 — Fractional Kelly** — quarter-Kelly by default; DTE-aware scaling (50% at DTE 0-2, full at DTE 7-21). File: `tradingbot/sizing/kelly.py`
+- **B2 — Greeks hard caps** — book-level delta/vega/theta/single-name concentration limits. File: `tradingbot/sizing/limits.py`
+- **B3 — CVaR stress** — 5 scenarios (±3%, ±5% move, VIX +10, VIX +20). Rejects or reduces size if any breach. File: `tradingbot/sizing/cvar.py`
 
 ---
 
-## Phase D — Regime Enhancement [COMPLETE]
+## Phase C — Exit Engine [DONE]
 
-Goal: improve the quality of regime classification and add missing intraday context.
+**What it does:** Every open position is monitored and closed by rule — no unattended exposure.
 
-### D1 — Session-State Overlay
+Exit rules (evaluated in order):
+1. Stop loss: loss >= max_loss → close immediately
+2. Profit target: gain >= 50% of max_profit → close (configurable via env vars)
+3. DTE emergency: DTE < threshold on short leg → close to avoid assignment
+4. Time stop: position held past time limit → evaluate close
+5. Hard EOD: 3:55 PM ET → force close all intraday positions
+6. Regime flip + direction conflict → forced close (not just review flag)
 
-Current regime (vol × trend) is a daily signal. Add intraday session tagging:
-- OPEN: 9:30-10:00 ET (high vol, wide spreads, flow meaningful)
-- MORNING: 10:00-12:00 ET (direction establishes)
-- MIDDAY: 12:00-14:00 ET (low vol, narrow ranges, theta harvest)
-- AFTERNOON: 14:00-15:30 ET (institutional positioning)
-- POWER_HOUR: 15:30-16:00 ET (directional follow-through, closing flows)
+Files: `tradingbot/execution/exit.py`, `tradingbot/execution/monitor.py`, `tradingbot/execution/roll.py`
 
-Debater weights adjust by session: flow and GEX matter more at OPEN;
-technical matters more in AFTERNOON; income/theta harvesting in MIDDAY.
-
-**File:** `tradingbot/regime/session.py`
-
-### D2 — Leading Crisis Signal
-
-Current crisis trigger (VIX > 35 or RV/IV > 1.20) is backward-looking.
-By the time VIX hits 35, the vol spike is priced.
-
-Leading indicators to add:
-- VIX3M/VIX ratio < 1.05: term structure flattening (near-term fear rising)
-- VVIX > 110: vol-of-vol elevated (options on options expensive = hedging demand)
-- Both conditions simultaneously → early CRISIS signal, shift regime one step earlier
-
-**File:** `tradingbot/regime/classifier.py` (add _leading_crisis_check method)
-
-### D3 — Cross-Asset Macro Signals
-
-TLT, HYG, DXY as regime context:
-- TLT falling + DXY rising: risk-off flight to dollar (bearish equities)
-- TLT rising + DXY falling: risk-on (bullish equities, watch for reflation)
-- HYG/JNK spread widening: credit stress precedes equity vol by 1-3 days
-- USO spike > 3%: energy shock, bearish XLY, XLF; bullish XLE
-
-These are NOT separate debaters. They are additional inputs to the regime classifier
-that shift vol_state or flag CAUTION/HALT on the MacroSignal.
-
-**File:** `tradingbot/regime/classifier.py` (add cross_asset_context parameter)
-
-### D4 — Max Pain / Call-Put Walls from GEX
-
-The existing `compute_gex()` function has all the data. Extend it to compute:
-- `call_wall`: highest open interest call strike (magnetic ceiling)
-- `put_wall`: highest open interest put strike (magnetic support)
-- `max_pain`: strike where total option value (calls + puts) is minimized (pinning target)
-
-These populate `Setup.resistance_level` (= call wall) and `Setup.support_level` (= put wall).
-Max pain is stored in context for intraday target setting.
-
-**File:** `tradingbot/dealer/gex.py` (extend GEXResult)
-
-### D5 — Fix Additive Conviction Scoring
-
-Current: directional debater counts RSI + VWAP + EMA signals as independent votes.
-Problem: these are all derived from the same price series — highly correlated.
-
-Fix: group signals by independent data source:
-- Group A (price momentum): VWAP position, EMA crossover, price vs prior close
-- Group B (oscillator): RSI, stochastic
-- Group C (structure): multi-timeframe alignment
-
-Vote = max conviction from each group. Cross-group agreement multiplies conviction.
-Same fix applies to flow debater (PCR, sweep counts, OI changes are partially correlated).
-
-**File:** `tradingbot/debaters/directional.py`, `tradingbot/debaters/flow.py`
+Exit thresholds are configurable via environment variables (see `.env.example`).
 
 ---
 
-## Phase E — Real Flow Data [COMPLETE]
+## Phase D — Regime Enhancement [DONE]
 
-Decision point: select a data vendor for real-time options tape.
+**What it added:** Better intraday context and earlier crisis detection.
 
-### E1 — Data Source Evaluation
-
-| Source | Cost | Coverage | Quality |
-|---|---|---|---|
-| Unusual Whales API | ~$50/mo | Sweeps, dark pool, PCR | High |
-| Tradier streaming | ~$10/mo | Real-time chain, tick | High |
-| Moomoo OpenD | Already integrated | Options chain, EOD OI | Medium |
-| yfinance | Free | EOD chain, 15-min delayed | Low |
-
-Recommendation: Tradier for real-time chain data + Unusual Whales for sweep/dark pool.
-Current yfinance suffices for daily regime detection but not intraday flow.
-
-### E2 — Wire FlowDebater to Real Sweeps
-
-Once data source chosen:
-- Feed real PCR (from tape, not derived from delta) into flow_data["put_call_ratio"]
-- Feed real sweep counts: flow_data["call_sweep_count"], flow_data["put_sweep_count"]
-- Feed dark pool: flow_data["dark_pool_bullish"], flow_data["dark_pool_bearish"]
-- FlowDebater conviction scale is already correct; only the inputs are wrong
-
-**File:** `tradingbot/dataflows/flow_adapter.py` (new)
-
-### E3 — Expiration-Aware Flow
-
-Track which expiration smart money is targeting:
-- Sweeps in front-week options: high urgency, directional
-- Sweeps in longer-dated options (30-60 DTE): positioning, less urgent
-- OI accumulation in specific strikes = price targets, not just direction
+- **D1 — Session overlay** — OPEN/MORNING/MIDDAY/AFTERNOON/POWER_HOUR intraday tags; debater weights adjust by session. File: `tradingbot/regime/session.py`
+- **D2 — Leading crisis signal** — VIX3M/VIX < 1.05 AND VVIX > 110 triggers early CRISIS flag (not lagging VIX > 35). File: `tradingbot/regime/classifier.py`
+- **D3 — Cross-asset context** — TLT, HYG, DXY as regime inputs. File: `tradingbot/regime/classifier.py`
+- **D4 — GEX walls** — call wall, put wall, max pain from option chain OI. File: `tradingbot/dealer/gex.py`
 
 ---
 
-## Phase F — Backtesting Harness [COMPLETE]
+## Phase E — Real Flow Data [DONE]
 
-### F1 — Historical Replay Framework
+**What it added:** Pluggable adapter registry so real sweep/PCR data replaces synthetic chain-derived estimates.
 
-`scripts/backtest.py`: replay 6-12 months of daily data through full pipeline.
-- yfinance daily OHLCV + EOD options snapshot
-- Synthetic regime classification from historical VIX + price data
-- Run all debaters; record opinions vs next-day outcome (direction of close-to-close)
-- Output: per-debater accuracy by regime, confusion matrix, Sharpe by regime
-
-### F2 — Bandit Validation
-
-Before warm-starting, validate the posteriors make economic sense:
-- Check that income debater performs better in high-IV regimes
-- Check that directional debater performs better in trending regimes
-- Check that flow debater (when real data available) outperforms random in all regimes
-
-### F3 — A/B vs v1
-
-TRADINGBOT_FLAG_AB_V1 flag exists but is unconnected. Wire it:
-- On each scan, record v2 consensus direction and v1 decision
-- Compare: win rate, avg P&L, Sharpe, max drawdown over same period
-- Paper cutover when v2 >= v1 on 90-day window
-
-### F4 — Paper Cutover Gate
-
-Hard requirements before cutover:
-1. Phase A complete: honest debaters, live correlation, warm bandit [DONE]
-2. Phase B complete: sizing engine passing all scenario checks
-3. Phase C complete: exit engine running on all open positions
-4. Phase F3: v2 Sharpe >= v1 Sharpe on 90-day replay
-5. 2 weeks of shadow mode with no sizing/exit rule breaches
+Adapters: yfinance (default), moomoo, tradier, options_whale, unusual_whales.  
+The latter three require API credentials — system falls back to yfinance without them.  
+File: `tradingbot/dataflows/flow_adapter.py`
 
 ---
 
-## Build Order and Timeline
+## Phase F — Backtesting Harness [DONE]
 
-```
-Week 1-2:   Phase A (signal integrity — prerequisite for everything)  [COMPLETE]
-Week 3-4:   Phase B (sizing engine — gating item for paper trading)   [COMPLETE]
-Week 5-6:   Phase C (exit engine — gating item for unattended running)[COMPLETE]
-Week 7:     Phase D (regime enhancement — improves quality, not gating)[COMPLETE]
-Week 8+:    Phase E (real flow data — adapter layer complete)          [COMPLETE]
-Ongoing:    Phase F (backtesting, A/B vs v1)                          [COMPLETE]
+**What it added:** Validated system against 12 months of historical data before paper trading.
 
-Paper trade cutover: after A + B + C complete and F shows parity with v1
-```
+- **F1** — Daily OHLCV + EOD options replay via yfinance. File: `scripts/backtest.py`
+- **F2** — Per-debater accuracy by regime. See `docs/BACKTEST_LEARNINGS.md` for results.
+- **F3** — A/B vs v1: v2 Sharpe >= v1 on 90-day window. Flag: `TRADINGBOT_FLAG_AB_V1`
+- **F4** — Paper cutover gate: parity confirmed.
 
 ---
 
-## Known Risks
+## Post-Phase F: Signal Quality (Planned)
 
-| Risk | Likelihood | Mitigation |
-|---|---|---|
-| Flow data cost > budget | Medium | Start with moomoo built-in; add Unusual Whales gradually |
-| Bandit warm-start overfits to training window | Medium | Use out-of-sample validation period; cap posterior updates |
-| Sizing engine rejects all trades (too conservative) | Low | Tune Kelly fraction and cap thresholds against backtest |
-| Exit engine forces premature closes | Medium | A/B test exit rules against hold-to-expiry baseline |
-| Regime classifier misclassifies transitions | High (always) | Session overlay + posterior distribution smooths boundaries |
+See `docs/IMPROVEMENT_PLAN.md` for details.
+
+| Item | Goal | Status |
+|------|------|--------|
+| P1 — Directional debater | RSI/MACD with session weighting | Planned |
+| P2 — Sentiment rewrite | IV-skew + earnings calendar | Planned |
+| P3 — Calibrator refit | Platt scaling refresh from live outcomes | Planned |
+| P4 — Income/vol debaters | Tuning for current IV environment | Deferred |
+
+---
+
+## May 2026 Bug Fixes
+
+All post-launch fixes are documented in [INCIDENTS.md](INCIDENTS.md).
+
+| Date | Fix | Commit |
+|------|-----|--------|
+| May 28 | DTE wiring through structure picker | `a929a7f` |
+| May 27 | Exit engine env-var configuration | staged |
+| May 27 | Scan hang (moomoo timeout) | `fcb02d9` |
+| May 22 | Structure picker guard gate | `1388df6` |
+| May 22 | Intelligent expiry selection | `0b48476` |
+| May 22 | Daemon recovery + Telegram alerts | `b145aa5` |
