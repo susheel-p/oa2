@@ -9,7 +9,8 @@
       "Bash(docker exec *)",
       "PowerShell(ls \"C:\\\\Users\\\\pamed\\\\Susheel\\\\oa2-new\\\\tradingbot\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName)",
       "Bash(find /mnt/c/Users/pamed/Susheel/oa2-new/cache -type f 2>/dev/null | head -20)",
-      "Read(//mnt/c/Users/pamed/Susheel/oa2-new/**)"
+      "Read(//mnt/c/Users/pamed/Susheel/oa2-new/**)",
+      "Bash(python -m pytest tests/ -q)"
     ]
   }
 }

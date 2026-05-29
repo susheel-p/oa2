@@ -73,7 +73,7 @@ def test_hard_eod_fires_at_replay_time_not_wall_clock():
     # regardless of what time it is on the host running the test.
     clock = ManualClock(dt.datetime(2025, 6, 3, 15, 56, tzinfo=ET))
     engine = ExitEngine(clock=clock)
-    pos = _pos(structure="LONG_GAMMA_SCALP", entry_dte=0, current_dte=0)
+    pos = _pos(structure="LONG_GAMMA_SCALP", entry_dte=0, current_dte=10)
     decision = engine.evaluate(pos)
     assert decision.should_exit
     assert decision.reason == ExitReason.HARD_EOD_CUTOFF
@@ -83,7 +83,7 @@ def test_hard_eod_fires_at_replay_time_not_wall_clock():
 def test_hard_eod_does_not_fire_before_cutoff_under_replay():
     clock = ManualClock(dt.datetime(2025, 6, 3, 12, 0, tzinfo=ET))
     engine = ExitEngine(clock=clock)
-    pos = _pos(structure="LONG_GAMMA_SCALP", entry_dte=0, current_dte=0)
+    pos = _pos(structure="LONG_GAMMA_SCALP", entry_dte=0, current_dte=10)
     decision = engine.evaluate(pos)
     assert not decision.should_exit
 

@@ -16,10 +16,12 @@ Covers:
 
 from __future__ import annotations
 
+import datetime as dt
 import time
 import unittest
 from unittest.mock import patch, MagicMock
 
+from tradingbot.core.clock import ManualClock
 from tradingbot.graph.pipeline import run, PipelineContext
 from tradingbot.sizing.limits import GreeksBook
 from tradingbot.execution.monitor import OpenPosition, PositionMonitor
@@ -403,6 +405,10 @@ class TestL8OpenPositionAlerts(unittest.TestCase):
         monitor = PositionMonitor()
         monitor.add(position)
 
+        # Use a fixed Monday at 10 AM ET to avoid Friday sweep / EOD cutoff issues
+        monday_10am = dt.datetime(2026, 5, 25, 10, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=-4)))
+        clock = ManualClock(monday_10am)
+
         with (
             patch("tradingbot.graph.pipeline.feature_flags.EXIT_ENGINE_ENABLED", True),
             patch("tradingbot.graph.pipeline.feature_flags.SIZING_ENGINE_ENABLED", False),
@@ -412,7 +418,7 @@ class TestL8OpenPositionAlerts(unittest.TestCase):
             patch("tradingbot.graph.pipeline.feature_flags.DEALER_AGENT_ENABLED", False),
             patch("tradingbot.graph.pipeline.feature_flags.DEALER_SHADOW_LOG", False),
         ):
-            ctx = run("SPY", context_dict=_SPY_MARKET_DATA, monitor=monitor)
+            ctx = run("SPY", context_dict=_SPY_MARKET_DATA, monitor=monitor, clock=clock)
         return ctx
 
     def test_stop_loss_hit_produces_alert(self):

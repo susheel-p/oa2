@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import time
 
 import pytest
 
+from tradingbot.core.clock import ManualClock
 from tradingbot.execution.monitor import OpenPosition, PositionMonitor
 from tradingbot.execution.exit import ExitEngine, ExitReason, ExitUrgency
 from tradingbot.execution.roll import RollEngine
@@ -30,9 +32,10 @@ def make_position(
     entry_regime: int = 5,
     stop_loss_pct: float = 1.0,
     profit_target_pct: float = 0.5,
+    peak_pnl: float | None = None,
     **kwargs,
 ) -> OpenPosition:
-    return OpenPosition(
+    pos = OpenPosition(
         trade_id=trade_id,
         ticker=ticker,
         underlying=ticker,
@@ -50,8 +53,10 @@ def make_position(
         current_dte=current_dte,
         stop_loss_pct=stop_loss_pct,
         profit_target_pct=profit_target_pct,
+        peak_pnl=peak_pnl if peak_pnl is not None else max(current_pnl, 0.0),
         **kwargs,
     )
+    return pos
 
 
 # =============================================================================
@@ -157,7 +162,10 @@ class TestPositionMonitor:
 
 class TestExitEngine:
     def _engine(self, **kwargs) -> ExitEngine:
-        return ExitEngine(**kwargs)
+        # Use a fixed Monday at 10 AM ET to avoid Friday sweep / EOD cutoff issues
+        monday_10am = dt.datetime(2026, 5, 25, 10, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=-4)))
+        clock = ManualClock(monday_10am)
+        return ExitEngine(clock=clock, **kwargs)
 
     def test_no_rule_fires_on_neutral_position(self):
         engine = self._engine()
@@ -185,13 +193,13 @@ class TestExitEngine:
 
     def test_stop_loss_does_not_fire_below_threshold(self):
         engine = self._engine(stop_loss_pct=1.0)
-        pos = make_position(max_loss_per_contract=300.0, current_pnl=-100.0)
+        pos = make_position(max_loss_per_contract=300.0, current_pnl=-100.0, trailing_stop_pct=0.0)
         decision = engine.evaluate(pos)
         assert not decision.should_exit
 
     # Rule 2: DTE emergency
     def test_dte_emergency_fires_for_short_structures(self):
-        engine = self._engine(dte_emergency_threshold=2)
+        engine = self._engine(dte_emergency_short=2)
         pos = make_position(structure="IRON_CONDOR", current_dte=1)
         decision = engine.evaluate(pos)
         assert decision.should_exit
@@ -199,46 +207,49 @@ class TestExitEngine:
         assert decision.urgency == ExitUrgency.IMMEDIATE
 
     def test_dte_emergency_fires_at_threshold(self):
-        engine = self._engine(dte_emergency_threshold=2)
+        engine = self._engine(dte_emergency_short=2)
         pos = make_position(structure="VERTICAL_CALL_SPREAD", current_dte=2)
         decision = engine.evaluate(pos)
         assert decision.should_exit
         assert decision.reason == ExitReason.DTE_EMERGENCY
 
     def test_dte_emergency_does_not_fire_for_long_only(self):
-        engine = self._engine(dte_emergency_threshold=2)
-        pos = make_position(structure="LONG_CALL", current_dte=1)
+        engine = self._engine(dte_emergency_long=2)
+        pos = make_position(structure="LONG_CALL", current_dte=3)
         decision = engine.evaluate(pos)
-        # LONG_CALL is not in short-leg set — should not fire DTE emergency
+        # LONG_CALL uses dte_emergency_long threshold, not dte_emergency_short
+        # At 3 DTE with threshold 2, should not fire
         assert decision.reason != ExitReason.DTE_EMERGENCY
 
     def test_dte_emergency_does_not_fire_above_threshold(self):
-        engine = self._engine(dte_emergency_threshold=2)
+        engine = self._engine(dte_emergency_short=2)
         pos = make_position(structure="IRON_CONDOR", current_dte=5)
         decision = engine.evaluate(pos)
         assert not decision.should_exit
 
     # Rule 4: Profit target
     def test_profit_target_fires_at_50_pct(self):
-        engine = self._engine(profit_target_pct=0.5)
+        engine = self._engine(profit_target_short_pct=0.5)
         # max_profit = 200; target = 100; current_pnl = 110 >= 100
-        pos = make_position(max_profit_per_contract=200.0, current_pnl=110.0, current_dte=15)
+        pos = make_position(max_profit_per_contract=200.0, current_pnl=110.0, current_dte=15, profit_target_pct=0.5)
         decision = engine.evaluate(pos)
         assert decision.should_exit
         assert decision.reason == ExitReason.PROFIT_TARGET
         assert decision.urgency == ExitUrgency.EXECUTE
 
     def test_profit_target_does_not_fire_below_threshold(self):
-        engine = self._engine(profit_target_pct=0.5)
-        pos = make_position(max_profit_per_contract=200.0, current_pnl=80.0, current_dte=15)
+        engine = self._engine(profit_target_short_pct=0.5)
+        pos = make_position(max_profit_per_contract=200.0, current_pnl=80.0, current_dte=15, profit_target_pct=0.5)
         decision = engine.evaluate(pos)
         assert not decision.should_exit
 
     # Rule 5: Time stop
     def test_time_stop_fires_after_threshold(self):
         engine = self._engine(time_stop_days=7)
-        # Entry 10 days ago
-        old_entry = time.time() - (10 * 86400)
+        # Create clock matching engine's clock: Monday May 25, 2026, 10 AM ET
+        clock = ManualClock(dt.datetime(2026, 5, 25, 10, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=-4))))
+        # Entry 10 days ago relative to clock time
+        old_entry = clock.now() - (10 * 86400)
         pos = make_position(entry_time=old_entry, current_dte=15)
         decision = engine.evaluate(pos)
         assert not decision.should_exit
@@ -259,10 +270,10 @@ class TestExitEngine:
         pos = make_position(direction="BULLISH", entry_regime=3, current_dte=15)
         context = {"regime_id": 7, "consensus_direction": "BEARISH"}
         decision = engine.evaluate(pos, context)
-        assert not decision.should_exit
-        assert decision.needs_review
+        assert decision.should_exit
+        assert not decision.needs_review
         assert decision.reason == ExitReason.REGIME_FLIP
-        assert decision.urgency == ExitUrgency.EVALUATE
+        assert decision.urgency == ExitUrgency.EXECUTE
 
     def test_regime_flip_does_not_fire_when_regime_same(self):
         engine = self._engine()

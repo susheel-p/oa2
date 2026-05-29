@@ -261,6 +261,9 @@ class ExitEngine:
     def _check_trailing_stop(self, pos: OpenPosition) -> ExitDecision:
         """Rule 2: Trailing stop — close if P&L drops trailing_stop_pct from peak,
         with floor at trailing_stop_pct loss from entry."""
+        if pos.trailing_stop_pct <= 0:
+            return self._no_exit(pos)
+
         threshold = pos.trailing_stop_threshold
         if pos.current_pnl <= threshold:
             return ExitDecision(
