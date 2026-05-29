@@ -198,7 +198,7 @@ def _get_quote_context():
                 f"OpenD not reachable at {host}:{port} — is the moomoo app running with OpenD enabled?"
             )
         try:
-            _quote_ctx = ft.OpenQuoteContext(host=host, port=port, conn_timeout=_OPEND_CONNECT_TIMEOUT)
+            _quote_ctx = ft.OpenQuoteContext(host=host, port=port)
         except Exception as e:
             raise Exception(f"Failed to connect to OpenD at {host}:{port}: {e}") from e
         import atexit
