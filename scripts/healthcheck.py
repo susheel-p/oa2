@@ -94,7 +94,10 @@ def check_calibrator_state() -> tuple[bool | None, str]:
             return False, f"Calibrator file missing: {cal_path}"
 
         cal = Calibrator.load(cal_path)
-        age_hours = (time.time() - cal.state.fit_timestamp) / 3600
+        # fit_timestamp is ISO string; parse it
+        from datetime import datetime as dt_class
+        fit_time = dt_class.fromisoformat(cal.state.fit_timestamp.replace('Z', '+00:00')).timestamp()
+        age_hours = (time.time() - fit_time) / 3600
 
         msg = (
             f"mode={cal.state.mode}, n_samples={cal.state.n_samples}, "
