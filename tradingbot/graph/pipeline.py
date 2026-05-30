@@ -122,6 +122,18 @@ def run(
         except Exception:
             calibrator = Calibrator()
 
+    # Warn if calibrator is uncalibrated or has low sample count
+    if calibrator.state.mode == "identity":
+        logger.log_warning(
+            "Calibrator in IDENTITY mode (uncalibrated)",
+            "Using raw debater probabilities. Run scripts/fit_calibrator.py or scripts/daily_learn.py to train."
+        )
+    elif calibrator.state.n_samples < 50:
+        logger.log_warning(
+            "Calibrator has low sample count",
+            f"Only {calibrator.state.n_samples} samples (min 50). Mode={calibrator.state.mode}. Accuracy may be degraded."
+        )
+
     # ------------------------------------------------------------------
     # L0 — market data
     # ------------------------------------------------------------------
@@ -382,8 +394,12 @@ def run(
                     "direction": ctx.consensus.direction.value,
                 }, "L5b")
         except Exception as e:
-            ctx.attribution["structure_pick_error"] = str(e)
+            ctx.attribution["structure_pick"] = {"status": "no_viable_structure", "error": str(e)}
             logger.log_warning("Structure picker failed", str(e))
+
+    # Fallback: ensure structure_pick is set if consensus exists but direction is unsupported
+    if ctx.consensus is not None and "structure_pick" not in ctx.attribution:
+        ctx.attribution["structure_pick"] = {"status": "no_viable_structure"}
 
     # ------------------------------------------------------------------
     # L6 — sizing engine (Kelly + book limits + CVaR)

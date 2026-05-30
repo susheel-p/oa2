@@ -136,13 +136,13 @@ class OpenPosition:
 
     @property
     def trailing_stop_threshold(self) -> float:
-        """Stop level: closes if P&L drops trailing_stop_pct from peak, floored at entry.
+        """Stop level: closes if P&L drops trailing_stop_pct from peak, floored at max_loss.
 
-        When no profit made: uses entry-based floor (-entry_premium * contracts * trailing_stop_pct).
-        When profitable: uses peak_pnl * (1 - trailing_stop_pct) but also bound by entry floor.
+        When no profit made: uses max-loss-based floor (-max_loss * trailing_stop_pct).
+        When profitable: uses peak_pnl * (1 - trailing_stop_pct) but also bound by max-loss floor.
         Returns the higher (less negative) of the two — fires when current_pnl <= this value.
         """
-        entry_floor = -(self.entry_premium * self.contracts * self.trailing_stop_pct)
+        entry_floor = -(self.max_loss * self.trailing_stop_pct)
         if self.peak_pnl <= 0:
             return entry_floor
         peak_trail = self.peak_pnl * (1 - self.trailing_stop_pct)

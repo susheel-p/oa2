@@ -799,12 +799,16 @@ def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
         # Fetch multiple option expirations for flow analysis
         expiries = _compute_expiry_dates()
         chains_by_expiry = {}
+        chain_fetch_failures = []
         for exp in expiries:
             try:
                 chain = fetch_options_chain(ticker, exp)
                 if chain.get("calls") or chain.get("puts"):
                     chains_by_expiry[exp] = chain
+                else:
+                    chain_fetch_failures.append(exp)
             except Exception as e:
+                chain_fetch_failures.append(exp)
                 warnings.warn(f"Failed to fetch {ticker} chain for {exp}: {e}")
 
         # For backwards compatibility: use first available chain as default
@@ -831,6 +835,7 @@ def fetch_market_snapshot(ticker: str) -> Dict[str, Any]:
             "latest_candle": latest,
             "bars": technicals,
             "chains_by_expiry": chains_by_expiry,
+            "chain_fetch_failures": chain_fetch_failures,
             "recommended_expiry": recommended_expiry,
             "options_chain": default_chain,
             "iv_rank": iv_rank,

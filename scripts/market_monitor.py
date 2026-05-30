@@ -29,6 +29,7 @@ import os
 import socket
 import subprocess
 import sys
+import sys
 import threading
 import time
 import traceback
@@ -358,6 +359,25 @@ class MarketMonitor:
     def _schedule_loop(self) -> None:
         """Main scheduling loop."""
         _log("Market monitor started", self.log_file)
+
+        # Run health check before first scan
+        try:
+            from scripts.healthcheck import run_all_checks, compute_verdict
+            _log("Running pre-flight health check...", self.log_file)
+            results = run_all_checks(verbose=False, fast=True)
+            verdict = compute_verdict(results)
+            if verdict == "NOT_READY":
+                msg = "Health check FAILED — system not ready for trading. Fix issues above and restart."
+                _log(msg, self.log_file)
+                raise RuntimeError(msg)
+            elif verdict == "READY_WITH_WARNINGS":
+                _log("Health check READY_WITH_WARNINGS — proceeding with caution", self.log_file)
+            else:
+                _log("Health check PASSED", self.log_file)
+        except ImportError:
+            _log("Health check not available (scripts/healthcheck.py missing); proceeding anyway", self.log_file)
+        except Exception as e:
+            _log(f"Health check error: {e}; proceeding anyway", self.log_file)
 
         # Setup heartbeat file for watchdog monitoring
         heartbeat_file = Path(__file__).parent.parent / "logs" / "daemon_heartbeat.txt"
