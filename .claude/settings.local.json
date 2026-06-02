@@ -11,7 +11,8 @@
       "Bash(find /mnt/c/Users/pamed/Susheel/oa2-new/cache -type f 2>/dev/null | head -20)",
       "Read(//mnt/c/Users/pamed/Susheel/oa2-new/**)",
       "Bash(python -m pytest tests/ -q)",
-      "PowerShell(docker exec tradingbot-daemon cat logs/daemon_heartbeat.txt 2>&1)"
+      "PowerShell(docker exec tradingbot-daemon cat logs/daemon_heartbeat.txt 2>&1)",
+      "PowerShell(docker exec tradingbot-daemon python -c \"import os; print\\(os.environ.get\\('TRADINGBOT_HOME', 'NOT SET'\\)\\)\" 2>&1)"
     ]
   }
 }

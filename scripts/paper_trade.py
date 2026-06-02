@@ -176,8 +176,8 @@ def _broker():
 def _load_live_positions() -> tuple[dict[str, dict], int]:
     """Query broker for live open positions and convert to tracking format.
 
-    Returns: (position_dict, count) where position_dict maps ticker -> position data
-    Only returns positions that are currently profitable or at risk (for monitoring).
+    Returns: (position_dict, count) where position_dict maps trade_id -> position data
+    All positions are returned, including multiple per ticker.
     Returns empty dict if broker query fails.
     """
     from tradingbot.execution.monitor import OpenPosition, Leg
@@ -232,13 +232,14 @@ def _load_live_positions() -> tuple[dict[str, dict], int]:
                     peak_pnl=max(0.0, bp.pnl),
                     legs=[leg],
                 )
-                positions_dict[bp.underlying] = op
+                positions_dict[trade_id] = op
                 _log(f"  Loaded from broker: {bp.underlying} {bp.right} {bp.strike} exp {bp.expiry} qty {bp.quantity} P&L ${bp.pnl:+.2f}")
 
             except Exception as e:
                 _log(f"  Warning: failed to load position: {e}")
                 continue
 
+        _log(f"Loaded {len(positions_dict)} total positions from broker")
         return positions_dict, len(positions_dict)
 
     except Exception as e:
