@@ -359,17 +359,11 @@ def _run_entry_only(account_size: float, tickers: list[str], dry_run: bool) -> N
     today = _today_str()
     positions_path = LOG_DIR / f"positions_{today}.json"
 
-    # Carry-over logic: load from previous day if today's doesn't exist yet
+    # Carry-over logic: load from SAME DAY only, never carry over from previous days
+    # (previous day's positions are stale — start fresh each new day)
     if not positions_path.exists():
-        positions_files = sorted(LOG_DIR.glob("positions_*.json"))
-        positions_files = [p for p in positions_files if p.name != f"positions_{today}.json"]
-        if positions_files:
-            latest_file = positions_files[-1]
-            _log(f"Carrying over open positions from previous session: {latest_file}")
-            monitor = PositionMonitor.load(latest_file)
-        else:
-            _log("No previous open positions found. Starting fresh.")
-            monitor = PositionMonitor()
+        _log("No positions file for today. Starting fresh.")
+        monitor = PositionMonitor()
         monitor.save(positions_path)
     else:
         monitor = PositionMonitor.load(positions_path)
@@ -440,22 +434,12 @@ def _run_exit_only(account_size: float, dry_run: bool) -> None:
     today = _today_str()
     positions_path = LOG_DIR / f"positions_{today}.json"
 
-    # Carry-over logic: load from previous day if today's doesn't exist yet
+    # Load today's positions only (never carry over from previous days)
     if not positions_path.exists():
-        positions_files = sorted(LOG_DIR.glob("positions_*.json"))
-        positions_files = [p for p in positions_files if p.name != f"positions_{today}.json"]
-        if positions_files:
-            latest_file = positions_files[-1]
-            _log(f"Carrying over open positions from previous session: {latest_file}")
-            monitor = PositionMonitor.load(latest_file)
-        else:
-            _log("No open positions file found.")
-            return
-        # Save immediately so subsequent checks find it
-        monitor.save(positions_path)
-    else:
-        monitor = PositionMonitor.load(positions_path)
+        _log("No open positions file for today.")
+        return
 
+    monitor = PositionMonitor.load(positions_path)
     positions = monitor.all_positions()
 
     if not positions:
@@ -802,30 +786,12 @@ def main() -> None:
 
     # Shared book and monitor across all tickers
     book = GreeksBook(account_size=account_size)
-    
-    # Load open positions from previous day (carry-over logic)
+
+    # Load open positions from today only (never carry over from previous days)
     positions_path = LOG_DIR / f"positions_{today}.json"
-    if not positions_path.exists():
-        positions_files = sorted(LOG_DIR.glob("positions_*.json"))
-        positions_files = [p for p in positions_files if p.name != f"positions_{today}.json"]
-        if positions_files:
-            latest_file = positions_files[-1]
-            _log(f"Carrying over open positions from previous session: {latest_file}")
-            monitor = PositionMonitor.load(latest_file)
-            for pos in monitor.all_positions():
-                book.add_position(
-                    trade_id=pos.trade_id,
-                    underlying=pos.ticker,
-                    delta=pos.delta,
-                    vega=pos.vega,
-                    theta=pos.theta,
-                    contracts=pos.contracts,
-                )
-        else:
-            _log("No previous open positions found. Starting fresh.")
-            monitor = PositionMonitor()
-    else:
+    if positions_path.exists():
         monitor = PositionMonitor.load(positions_path)
+        _log(f"Loaded {len(monitor.all_positions())} open position(s) from today")
         for pos in monitor.all_positions():
             book.add_position(
                 trade_id=pos.trade_id,
@@ -835,6 +801,9 @@ def main() -> None:
                 theta=pos.theta,
                 contracts=pos.contracts,
             )
+    else:
+        _log("No open positions file for today. Starting fresh.")
+        monitor = PositionMonitor()
 
     # ── Scan all tickers ──────────────────────────────────────────────────────
     results: list[dict] = []
