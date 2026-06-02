@@ -1,0 +1,397 @@
+# Telegram Message Templates for oa2 Trading System
+# Each template includes context, formatting, and optional examples
+# Use: python -c "import yaml; print(yaml.safe_load(open('telegram_templates.yml'))['scan_summary']['template'])"
+
+templates:
+  # ============================================================================
+  # DAILY MARKET SCAN - main daily report
+  # ============================================================================
+  scan_summary:
+    name: "Daily Market Scan"
+    description: "Sent after main full-scan completes (9:30 AM ET). Summary of all tickers evaluated."
+    trigger: "paper_trade.py full-scan completion"
+    template: |
+      📊 Market Scan — {date}
+      Scanned: {scanned_count} | Bull: {bullish_count} | Bear: {bearish_count} | Neutral: {neutral_count}
+
+      Approved Trades: {approved_count}
+      Rejected: {rejected_count}
+
+      Account Size: ${account_size:,.0f}
+
+      {detailed_breakdown}
+
+    fields:
+      date: "Format YYYY-MM-DD"
+      scanned_count: "Total tickers evaluated"
+      bullish_count: "Count of BULLISH consensus signals"
+      bearish_count: "Count of BEARISH consensus signals"
+      neutral_count: "Count of NEUTRAL/no signal"
+      approved_count: "Trades approved by sizing engine"
+      rejected_count: "Trades rejected (structure/risk/capital)"
+      account_size: "Current account size"
+      detailed_breakdown: "Optional: top 3 approved trades or key rejections"
+
+    example: |
+      📊 Market Scan — 2026-06-02
+      Scanned: 22 | Bull: 15 | Bear: 0 | Neutral: 7
+
+      Approved Trades: 3
+      Rejected: 19
+
+      Account Size: $50,000
+
+      Top Approved:
+      • SPY: Short Call Spread (320/325) 2 DTE
+      • QQQ: Iron Condor (395/400/410/415) 14 DTE
+      • IWM: Debit Put Spread (205/200) 7 DTE
+
+  # ============================================================================
+  # PREMARKET SIGNALS - early morning scan (8:00 AM)
+  # ============================================================================
+  premarket_scan:
+    name: "Premarket Market Scan"
+    description: "Sent at 8:00 AM ET before market open. Uses premarket pricing."
+    trigger: "Scheduled 8:00 AM, premarket full-scan"
+    template: |
+      🌅 Premarket Market Scan — {date}
+      Scanned: {scanned_count} | Bull: {bullish_count} | Neutral: {neutral_count}
+
+      Regime: {regime_summary}
+      VIX: {vix_level}
+      Premarket Movers: {premarket_alerts}
+
+      Status: Ready for 9:00 AM full-scan
+
+    fields:
+      date: "Format YYYY-MM-DD"
+      scanned_count: "Total tickers evaluated"
+      bullish_count: "Bullish signals at premarket prices"
+      neutral_count: "Neutral/no signal at premarket prices"
+      regime_summary: "e.g., 'Neutral-Vol Bullish' (R5)"
+      vix_level: "Current VIX value"
+      premarket_alerts: "Any unusual premarket movers or gaps"
+
+    example: |
+      🌅 Premarket Market Scan — 2026-06-02
+      Scanned: 22 | Bull: 12 | Neutral: 10
+
+      Regime: Neutral-Vol Bullish (R5)
+      VIX: 16.2
+      Premarket Movers: SPY +0.3% | QQQ +0.5% | GLD -0.2%
+
+      Status: Ready for 9:00 AM full-scan
+
+  # ============================================================================
+  # APPROVED TRADE - real-time trade alert
+  # ============================================================================
+  trade_approved:
+    name: "Trade Approved"
+    description: "Sent immediately when a trade is approved and approved for entry."
+    trigger: "Trade passes sizing gate and is approved"
+    template: |
+      ✅ Trade Approved: {ticker} {direction}
+
+      Structure: {structure} {strikes}
+      Expiry: {dte} DTE ({expiry_date})
+      Size: {contracts} contract(s)
+
+      Entry Premium: ${entry_premium:,.2f}
+      Max Risk: ${max_risk:,.2f}
+      Kelly: {kelly_pct}
+
+      Conviction: p_bull={p_bull:.1%}
+      Regime: {regime}
+
+    fields:
+      ticker: "Stock symbol"
+      direction: "BULLISH or BEARISH"
+      structure: "Call/Put, Spread type, etc."
+      strikes: "e.g., 320/325 or just 325C"
+      dte: "Days to expiration"
+      expiry_date: "e.g., 2026-06-19"
+      contracts: "Number of contracts"
+      entry_premium: "Total debit/credit received"
+      max_risk: "Maximum loss if trade hits stop"
+      kelly_pct: "Kelly fraction applied"
+      p_bull: "Probability bullish from consensus"
+      regime: "Regime bucket, e.g., R5 (Neutral-Vol Bullish)"
+
+    example: |
+      ✅ Trade Approved: SPY BULLISH
+
+      Structure: Short Call Spread 320/325
+      Expiry: 2 DTE (2026-06-04)
+      Size: 2 contracts
+
+      Entry Premium: $186.00
+      Max Risk: $814.00
+      Kelly: 15.2%
+
+      Conviction: p_bull=72.5%
+      Regime: R5 (Neutral-Vol Bullish)
+
+  # ============================================================================
+  # POSITION EXIT - position closing alert
+  # ============================================================================
+  position_exit:
+    name: "Position Exit"
+    description: "Sent when a position is closed due to profit target, stop loss, expiry, or manual exit."
+    trigger: "Exit rules triggered OR manual exit executed"
+    template: |
+      📤 Position EXIT: {ticker}
+
+      Structure: {structure}
+      Exit Reason: {reason}
+      Urgency: {urgency}
+
+      P&L: ${pnl:+.2f} ({pnl_pct:+.1%})
+      Hold Duration: {hold_duration}
+
+      Entry: {entry_time}
+      Exit: {exit_time}
+
+    fields:
+      ticker: "Stock symbol"
+      structure: "Original structure traded"
+      reason: "50% profit / Stop hit / DTE < 2 / Manual / Regime flip"
+      urgency: "IMMEDIATE / EXECUTE / EVALUATE"
+      pnl: "Profit/loss in dollars"
+      pnl_pct: "Profit/loss as percentage"
+      hold_duration: "e.g., 2d 4h 15m"
+      entry_time: "HH:MM:SS entry timestamp"
+      exit_time: "HH:MM:SS exit timestamp"
+
+    example: |
+      📤 Position EXIT: QQQ
+
+      Structure: Iron Condor 395/400/410/415
+      Exit Reason: 50% profit target hit
+      Urgency: EXECUTE
+
+      P&L: +$125.50 (+18.2%)
+      Hold Duration: 3d 2h 47m
+
+      Entry: 08:45:12
+      Exit: 12:32:59
+
+  # ============================================================================
+  # SYSTEM HEALTH - 8 AM system check
+  # ============================================================================
+  system_health:
+    name: "System Health Report"
+    description: "Sent at 8:00 AM ET. Quick health check before market opens."
+    trigger: "Scheduled 8:00 AM"
+    template: |
+      ⚙️ System Health Report — {date}
+
+      Daemon: {daemon_status}
+      Heartbeat: {heartbeat_status} ({heartbeat_age_sec}s ago)
+      Last Activity: {last_activity}
+
+      Recent Errors: {error_count}
+      Positions Open: {position_count}
+
+      {additional_alerts}
+
+    fields:
+      date: "Format YYYY-MM-DD"
+      daemon_status: "RUNNING / STALE / STOPPED"
+      heartbeat_status: "✅ HEALTHY / ⚠️ AGING / ❌ STALE"
+      heartbeat_age_sec: "Seconds since last heartbeat"
+      last_activity: "Last operation timestamp"
+      error_count: "Pipeline errors in last 24h"
+      position_count: "Number of open positions"
+      additional_alerts: "Any warnings or critical issues"
+
+    example: |
+      ⚙️ System Health Report — 2026-06-02
+
+      Daemon: RUNNING
+      Heartbeat: ✅ HEALTHY (32s ago)
+      Last Activity: 2026-06-02 08:15:42
+
+      Recent Errors: 0
+      Positions Open: 2
+
+      All systems nominal.
+
+  # ============================================================================
+  # SYSTEM ALERT - noon watchdog check
+  # ============================================================================
+  system_alert:
+    name: "System Alert"
+    description: "Sent at noon if daemon is stale or errors detected. Critical alert."
+    trigger: "Noon watchdog check detects issues"
+    template: |
+      🚨 System Issues Detected — {date} (Noon Check)
+
+      {alert_details}
+
+      Action Required: {action}
+      Last Activity: {last_activity}
+
+    fields:
+      date: "Format YYYY-MM-DD"
+      alert_details: "Daemon stale / Errors detected / Heartbeat missing / etc"
+      action: "Restart daemon / Check logs / Manual intervention needed / etc"
+      last_activity: "Last known operation timestamp"
+
+    example: |
+      🚨 System Issues Detected — 2026-06-02 (Noon Check)
+
+      ❌ Daemon is stale - no heartbeat for 1395s
+      ⚠️ 2 pipeline error(s) detected
+
+      Action Required: Manual restart or investigate logs
+      Last Activity: 2026-06-02 11:47:33
+
+  # ============================================================================
+  # DAILY SUMMARY - end of day (4:15 PM)
+  # ============================================================================
+  daily_summary:
+    name: "Daily Summary Report"
+    description: "Sent at 4:15 PM ET. Complete day summary with P&L, positions, and next-day outlook."
+    trigger: "Scheduled 4:15 PM after market close"
+    template: |
+      📈 Daily Summary — {date}
+
+      Trades Executed:
+      • Approved: {approved_count} | Rejected: {rejected_count} | Errors: {error_count}
+
+      Book Status:
+      • Open Positions: {position_count}
+      • Net Delta: {net_delta:+.2f} | Net Theta: {net_theta:+.2f}/day
+      • Unrealized P&L: ${unrealized_pnl:+,.2f}
+
+      Daily P&L:
+      • Closed Trades: ${closed_pnl:+,.2f}
+      • Account Value: ${account_value:,.2f}
+
+      Tomorrow:
+      • Regime Outlook: {regime_outlook}
+      • Market Status: {market_status}
+
+    fields:
+      date: "Format YYYY-MM-DD"
+      approved_count: "Approved trades today"
+      rejected_count: "Rejected trades today"
+      error_count: "Pipeline errors today"
+      position_count: "Number of open positions"
+      net_delta: "Net delta exposure"
+      net_theta: "Daily theta decay"
+      unrealized_pnl: "Mark-to-market P&L on open positions"
+      closed_pnl: "Realized P&L from closed trades"
+      account_value: "Current account balance"
+      regime_outlook: "Expected regime for tomorrow"
+      market_status: "Market holiday / Trading / etc"
+
+    example: |
+      📈 Daily Summary — 2026-06-02
+
+      Trades Executed:
+      • Approved: 3 | Rejected: 19 | Errors: 0
+
+      Book Status:
+      • Open Positions: 2
+      • Net Delta: +0.45 | Net Theta: +18.50/day
+      • Unrealized P&L: +$247.32
+
+      Daily P&L:
+      • Closed Trades: +$156.00
+      • Account Value: $50,403.32
+
+      Tomorrow:
+      • Regime Outlook: Continue neutral-vol bullish
+      • Market Status: Trading (FOMC decision at 2:00 PM)
+
+  # ============================================================================
+  # ERROR ALERT - immediate critical error
+  # ============================================================================
+  critical_error:
+    name: "Critical Error Alert"
+    description: "Sent immediately for critical pipeline failures or execution errors."
+    trigger: "Critical error detected in pipeline or broker execution"
+    template: |
+      ⚠️ CRITICAL ERROR — {date} {time}
+
+      Component: {component}
+      Error: {error_msg}
+
+      Affected: {affected}
+      Severity: {severity}
+
+      Action: {action}
+
+    fields:
+      date: "Format YYYY-MM-DD"
+      time: "HH:MM:SS"
+      component: "e.g., sizing_engine, broker_api, consensus"
+      error_msg: "Error message from system"
+      affected: "Which trades/positions affected"
+      severity: "CRITICAL / HIGH / MEDIUM"
+      action: "Manual review required / Restart daemon / Escalate / etc"
+
+    example: |
+      ⚠️ CRITICAL ERROR — 2026-06-02 09:15:33
+
+      Component: broker_api
+      Error: Connection timeout after 30s
+
+      Affected: SPY trade entry (3 contracts)
+      Severity: CRITICAL
+
+      Action: Manual review required - check broker connection
+
+# ============================================================================
+# USAGE EXAMPLES
+# ============================================================================
+
+usage:
+  python_integration: |
+    # In telegram_notify.py or market_monitor.py:
+    import yaml
+
+    with open('scripts/telegram_templates.yml') as f:
+        templates = yaml.safe_load(f)
+
+    # Access template
+    template = templates['templates']['scan_summary']['template']
+    msg = template.format(
+        date='2026-06-02',
+        scanned_count=22,
+        bullish_count=15,
+        bearish_count=0,
+        neutral_count=7,
+        approved_count=3,
+        rejected_count=19,
+        account_size=50000,
+        detailed_breakdown='Top Approved:\n• SPY: Short Call Spread'
+    )
+    telegram_notify.send(msg)
+
+  review_logs_integration: |
+    # In review_logs.ps1, add telegram summary:
+
+    # After building summary:
+    $telegramMsg = @"
+    📊 Market Scan — $Date
+    Scanned: $($tickerRecords.Count) | Bull: $bullishCount | Bear: $bearishCount | Neutral: $neutralCount
+
+    Approved Trades: $($approved.Count)
+    Rejected: $($tickerRecords.Count - $approved.Count)
+
+    Account Size: $$([Math]::Round($summary.account_size))
+    "@
+
+    # Then send via API or log for manual Telegram post
+
+notes: |
+  - Avoid emoji overuse (use sparingly for key alerts)
+  - Keep messages under 2000 characters for Telegram
+  - Include timestamps and context for all alerts
+  - Format currency as $XXX,XXX.XX (commas for clarity)
+  - Use percentages for ratios (p_bull, Kelly, etc.)
+  - Professional but friendly tone
+  - Always include date and time for troubleshooting
+  - Group related info together (trades, book status, P&L)
