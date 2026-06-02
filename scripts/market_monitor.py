@@ -452,13 +452,19 @@ class MarketMonitor:
 
             # Catch-up for missed scheduled events on market days (if we wake up past the target time)
             if is_market_day(now):
-                # Catch-up: premarket scan (target 8:00 AM) — only run between 8:00-9:30 AM
-                if not self.premarket_scan_done_today and now.hour == 8 and 0 <= now.minute < 45:
+                # Catch-up: premarket scan (target 8:00 AM) — can run anytime, no trades placed
+                if not self.premarket_scan_done_today and now.hour == 8 and now.minute >= 0:
+                    _log("Catch-up: running premarket scan (missed 8:00 AM window)", self.log_file)
+                    self._run_premarket_scan()
+                elif not self.premarket_scan_done_today and now.hour == 8 and now.minute < 45:
                     _log("Catch-up: running premarket scan (missed 8:00 AM window)", self.log_file)
                     self._run_premarket_scan()
 
-                # Catch-up: premarket report (target 8:45 AM) — only run between 8:45-9:30 AM
-                if not self.premarket_done_today and ((now.hour == 8 and now.minute >= 45) or (now.hour == 9 and now.minute < 30)):
+                # Catch-up: premarket report (target 8:45 AM) — can run anytime, no trades placed
+                if not self.premarket_done_today and now.hour == 8 and now.minute >= 45:
+                    _log("Catch-up: running premarket report (missed 8:45 AM window)", self.log_file)
+                    self._run_premarket_report()
+                elif not self.premarket_done_today and now.hour == 9 and now.minute < 45:
                     _log("Catch-up: running premarket report (missed 8:45 AM window)", self.log_file)
                     self._run_premarket_report()
 
