@@ -47,9 +47,9 @@ from scripts.market_summary import get_market_summary
 from tradingbot.core.market_hours import is_market_day
 
 
-# Container heartbeat location (mounted from host)
-# Containerized daemon writes to /app/logs/daemon_heartbeat.txt which mounts to host tradingbot-docker/logs/
-HEARTBEAT_FILE = Path("C:/Users/pamed/Susheel/tradingbot-docker/logs/daemon_heartbeat.txt")
+# Container heartbeat location (where daemon writes inside container)
+# market_monitor.py writes to /app/logs/daemon_heartbeat.txt inside the container
+HEARTBEAT_FILE = Path("/app/logs/daemon_heartbeat.txt")
 
 # Watchdog state/log in project logs directory (for native monitoring)
 TRADINGBOT_HOME = Path(os.getenv("TRADINGBOT_HOME") or Path(__file__).parent.parent)
