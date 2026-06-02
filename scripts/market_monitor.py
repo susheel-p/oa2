@@ -215,6 +215,23 @@ class MarketMonitor:
         self.weekly_analysis_done_today = False
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
+        self.heartbeat_file: Path | None = None
+        self.heartbeat_thread: threading.Thread | None = None
+
+    def _start_heartbeat_thread(self) -> None:
+        """Start background thread that updates heartbeat every 60s."""
+        if self.heartbeat_file is None:
+            return
+
+        def _heartbeat_loop() -> None:
+            while not self.stop_event.is_set():
+                _update_heartbeat(self.heartbeat_file)
+                self.stop_event.wait(60)  # Update every 60s
+
+        if self.heartbeat_thread is None or not self.heartbeat_thread.is_alive():
+            self.heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+            self.heartbeat_thread.start()
+            _log("Heartbeat thread started (updates every 60s)", self.log_file)
 
     def _build_cmd(self, mode: str) -> list[str]:
         """Build the paper_trade.py command."""
@@ -380,8 +397,11 @@ class MarketMonitor:
             _log(f"Health check error: {e}; proceeding anyway", self.log_file)
 
         # Setup heartbeat file for watchdog monitoring
-        heartbeat_file = Path(__file__).parent.parent / "logs" / "daemon_heartbeat.txt"
-        heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
+        self.heartbeat_file = Path(__file__).parent.parent / "logs" / "daemon_heartbeat.txt"
+        self.heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Start background heartbeat thread (updates every 60s during long operations)
+        self._start_heartbeat_thread()
 
         last_daily_reset = _now_et().date()
 
@@ -527,9 +547,6 @@ class MarketMonitor:
                 and now.minute == 30
             ):
                 self._run_weekly_analysis()
-
-            # Write heartbeat for watchdog monitoring (before checking self.once)
-            _update_heartbeat(heartbeat_file)
 
             if self.once:
                 break
