@@ -503,6 +503,78 @@ def _run_entry_only(account_size: float, tickers: list[str], dry_run: bool) -> N
     _log(f"Entry scan done: {approved_count} approved, {rejected_count} rejected")
 
 
+def _compute_fresh_position_value(pos: OpenPosition) -> tuple[float, float]:
+    """Fetch live option chain and compute fresh P&L and Greeks for a position.
+
+    Returns: (fresh_pnl, fresh_delta) or (initial_pnl, 0) on error.
+    """
+    if not pos.legs:
+        return pos.current_pnl, 0.0
+
+    try:
+        from tradingbot.dataflows.moomoo_data import fetch_options_chain
+
+        # Group legs by expiry to fetch chains
+        expirations = set()
+        for leg in pos.legs:
+            expirations.add(leg.expiry.isoformat())
+
+        chains_by_expiry = {}
+        for exp_str in expirations:
+            try:
+                chain = fetch_options_chain(pos.underlying, exp_str)
+                chains_by_expiry[exp_str] = chain
+            except Exception as e:
+                _log(f"    [WARN] Failed to fetch chain for {pos.underlying} {exp_str}: {e}")
+                continue
+
+        if not chains_by_expiry:
+            return pos.current_pnl, 0.0
+
+        # Compute position-level delta and estimated P&L from chain data
+        position_delta = 0.0
+        position_value = 0.0
+
+        for leg in pos.legs:
+            exp_str = leg.expiry.isoformat()
+            chain = chains_by_expiry.get(exp_str, {})
+            contracts = chain.get("calls" if leg.right == "C" else "puts", [])
+
+            # Find the contract matching this leg's strike
+            matching = [c for c in contracts if abs(c.get("strike", 0) - leg.strike) < 0.01]
+            if not matching:
+                # Strike not in chain, skip this leg
+                continue
+
+            contract = matching[0]
+            leg_delta = contract.get("delta", 0.0) * leg.side * leg.contracts
+            leg_mid = (contract.get("bid", 0.0) + contract.get("ask", 0.0)) / 2.0
+            if leg_mid == 0 and contract.get("bid", 0) > 0:
+                leg_mid = contract.get("bid", 0.0)
+
+            position_delta += leg_delta
+            # Position value = sum of leg values (accounting for side)
+            position_value += leg_mid * leg.side * leg.contracts * 100
+
+        # Estimate P&L: current value - entry value
+        entry_value = pos.entry_premium * pos.contracts * 100 if pos.entry_premium > 0 else 0
+        fresh_pnl = position_value - entry_value if entry_value > 0 else pos.current_pnl
+
+        # Estimate max_loss and max_profit if they're zero (broker-loaded positions)
+        # This allows exit rules to work properly
+        if pos.max_loss_per_contract == 0 and pos.max_profit_per_contract == 0:
+            # Estimate: max_loss ≈ entry premium, max_profit ≈ 3x entry premium
+            if entry_value > 0:
+                pos.max_loss_per_contract = (pos.entry_premium * 100) / pos.contracts if pos.contracts > 0 else 100.0
+                pos.max_profit_per_contract = (pos.entry_premium * 300) / pos.contracts if pos.contracts > 0 else 300.0
+
+        return fresh_pnl, position_delta
+
+    except Exception as e:
+        _log(f"    [WARN] Failed to compute fresh position value for {pos.trade_id}: {e}")
+        return pos.current_pnl, 0.0
+
+
 def _run_exit_only(account_size: float, dry_run: bool) -> None:
     """Load today's positions from broker, fetch fresh quotes, run exit engine, log alerts."""
     import yfinance as yf
@@ -558,17 +630,23 @@ def _run_exit_only(account_size: float, dry_run: bool) -> None:
 
     for pos in positions:
         fresh_price = quotes.get(pos.underlying)
+
+        # Fetch live chain data and compute fresh P&L + delta
+        fresh_pnl, fresh_delta = _compute_fresh_position_value(pos)
+
         if fresh_price:
-            # Simple PnL re-mark: delta approximation
-            price_move = fresh_price - pos.entry_price
-            approx_pnl = pos.delta * price_move * pos.contracts
             monitor.mark_to_market(
                 pos.trade_id,
-                current_pnl=approx_pnl,
+                current_pnl=fresh_pnl,
                 current_underlying_price=fresh_price,
                 current_dte=pos.current_dte,
             )
-            pos = monitor.get(pos.trade_id)  # get updated object
+            # Update delta for trailing stop calculations
+            if fresh_delta != 0:
+                pos = monitor.get(pos.trade_id)
+                pos.delta = fresh_delta
+
+        pos = monitor.get(pos.trade_id)  # get updated object
 
         decision = engine.evaluate(pos, context)
         if decision.fired:
