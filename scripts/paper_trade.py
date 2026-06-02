@@ -1028,10 +1028,10 @@ def main() -> None:
                 entry_premium = float(result.get("entry_premium") or 0.0)
                 entry_regime = int(regime.get("regime_id") or 0)
                 entry_dte = int(struct_pick.get("dte") or 30)
-                # Read max_loss/max_profit from exit_rules (set by sizing engine), not struct_pick
-                max_loss_dollars = float(exit_rules.get("max_loss_dollars") or 0.0)
-                max_profit_dollars = float(exit_rules.get("max_profit_dollars") or 0.0)
-                max_profit_per = max_profit_dollars / contracts if contracts > 0 else 0.0
+                # Read max_loss/target_profit from decision (set by sizing engine), not struct_pick
+                max_loss_dollars = float(decision.get("max_loss_dollars") or 0.0)
+                target_profit_dollars = float(decision.get("target_profit_dollars") or 0.0)
+                max_profit_per = target_profit_dollars / contracts if contracts > 0 else 0.0
                 max_loss_per = max_loss_dollars / contracts if contracts > 0 else 0.0
 
                 delta = float(result.get("delta_per_contract", 0.0)) * contracts
