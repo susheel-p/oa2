@@ -468,8 +468,8 @@ class MarketMonitor:
                     _log("Catch-up: running premarket report (missed 8:45 AM window)", self.log_file)
                     self._run_premarket_report()
 
-                # Catch-up: full-scan (target 9:45 AM) — run if past 9:45 and before market close
-                if not self.full_scan_done_today and (now.hour > 9 or (now.hour == 9 and now.minute >= 45)) and now.hour < 16:
+                # Catch-up: full-scan (target 9:45 AM) — run if past 9:45 and MARKET STILL OPEN
+                if not self.full_scan_done_today and (now.hour > 9 or (now.hour == 9 and now.minute >= 45)) and is_market_open(now):
                     _log("Catch-up: running full-scan (missed 9:45 AM window)", self.log_file)
                     self._run_full_scan()
 
