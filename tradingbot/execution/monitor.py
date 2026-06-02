@@ -443,6 +443,23 @@ class PositionMonitor:
             missing = False
             min_dte: int | None = None
 
+            # Compute DTE from calendar first — independent of chain availability.
+            # This ensures expired positions (DTE <= 0) are always detected even
+            # when the chain provider returns None for expired strikes.
+            for leg in pos.legs:
+                dte = (leg.expiry - today_et).days
+                min_dte = dte if min_dte is None else min(min_dte, dte)
+
+            # Always update DTE so exit rules can detect expiry.
+            if min_dte is not None:
+                pos.current_dte = min_dte
+
+            # If already expired, skip chain lookup — no live quotes exist.
+            if min_dte is not None and min_dte <= 0:
+                pos.last_checked = self._clock.now()
+                skipped.append(pos.trade_id)
+                continue
+
             for leg in pos.legs:
                 quote = chain_provider(leg.underlying, leg.expiry, leg.strike, leg.right)
                 if quote is None:
@@ -452,8 +469,6 @@ class PositionMonitor:
                 d_sum += quote.get("delta", 0.0) * mult
                 v_sum += quote.get("vega", 0.0) * mult
                 t_sum += quote.get("theta", 0.0) * mult
-                dte = (leg.expiry - today_et).days
-                min_dte = dte if min_dte is None else min(min_dte, dte)
 
             if missing:
                 skipped.append(pos.trade_id)
@@ -462,8 +477,6 @@ class PositionMonitor:
             pos.delta = d_sum
             pos.vega = v_sum
             pos.theta = t_sum
-            if min_dte is not None:
-                pos.current_dte = min_dte
             pos.last_checked = self._clock.now()
 
         return skipped
@@ -482,7 +495,7 @@ class PositionMonitor:
         import json
         from pathlib import Path
         data = [p.to_dict() for p in self._positions.values()]
-        Path(path).write_text(json.dumps(data, indent=2))
+        Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @classmethod
     def load(cls, path: str, clock: Clock | None = None) -> "PositionMonitor":
@@ -491,7 +504,7 @@ class PositionMonitor:
         from pathlib import Path
         monitor = cls(clock=clock)
         if Path(path).exists():
-            data = json.loads(Path(path).read_text())
+            data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
             for d in data:
                 monitor.add(OpenPosition.from_dict(d))
         return monitor

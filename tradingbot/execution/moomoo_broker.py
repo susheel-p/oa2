@@ -295,6 +295,93 @@ class MoomooBroker:
             return LegFill(leg_id=leg_id, status=LegStatus.FAILED, error=f"query ret={ret}")
         return self._row_to_fill(df.iloc[0], leg_id)
 
+    def query_positions(self) -> list[Any]:  # Returns list[Position]
+        """Query all open option positions from broker.
+
+        Returns a list of Position objects representing holdings.
+        Returns empty list on error (no positions or query failure).
+        """
+        try:
+            ret, df = self._ctx().position_list_query(
+                trd_env=self._trd_env,
+                acc_id=self._acc_id,
+            )
+            if ret != 0 or df is None or df.empty:
+                logger.warning(f"position_list_query ret={ret}")
+                return []
+
+            from tradingbot.execution.broker import Position
+            positions: list[Position] = []
+
+            for _, row in df.iterrows():
+                try:
+                    code = str(row.get("code", "")).strip()
+                    if not code.startswith("US."):
+                        continue  # Skip non-US options
+
+                    # Parse moomoo option code: US.SPY260522C735000
+                    # Format: US.[UNDERLYING][YYMMDD][C/P][STRIKE*1000]
+                    code_no_prefix = code[3:]  # Remove "US."
+                    if len(code_no_prefix) < 10:
+                        continue
+
+                    # Extract components
+                    underlying = ""
+                    for i, ch in enumerate(code_no_prefix):
+                        if ch.isdigit():
+                            underlying = code_no_prefix[:i]
+                            break
+                    if not underlying:
+                        continue
+
+                    rest = code_no_prefix[len(underlying):]
+                    if len(rest) < 7:
+                        continue
+
+                    yymmdd = rest[:6]
+                    right = rest[6]
+                    strike_int = int(rest[7:])
+                    strike = strike_int / 1000.0
+
+                    # Parse date
+                    import datetime as _dt
+                    yy = int(yymmdd[:2])
+                    mm = int(yymmdd[2:4])
+                    dd = int(yymmdd[4:6])
+                    year = 2000 + yy if yy <= 50 else 1900 + yy
+                    expiry = _dt.date(year, mm, dd)
+
+                    # Get position details
+                    quantity = int(row.get("qty", 0) or 0)
+                    if row.get("position_side") == "Short":
+                        quantity = -quantity
+
+                    avg_price = float(row.get("cost_price", 0) or 0.0)
+                    current_price = float(row.get("market_price", 0) or 0.0)
+                    pnl = float(row.get("unrealized_pl", 0) or 0.0)
+
+                    pos = Position(
+                        underlying=underlying,
+                        expiry=expiry,
+                        strike=strike,
+                        right=right,
+                        quantity=quantity,
+                        avg_price=avg_price,
+                        current_price=current_price,
+                        pnl=pnl,
+                    )
+                    positions.append(pos)
+                except Exception as e:
+                    logger.warning(f"Failed to parse position row: {e}")
+                    continue
+
+            return positions
+
+        except Exception as e:
+            self._reset()
+            logger.error(f"position_list_query exception: {e}")
+            return []
+
     # ------------------------------------------------------------------
 
     @staticmethod

@@ -66,6 +66,19 @@ class LegFill:
     error: str | None = None
 
 
+@dataclass
+class Position:
+    """Live position held in the broker account."""
+    underlying: str            # e.g. "SPY"
+    expiry: _dt.date           # expiration date
+    strike: float              # strike price
+    right: str                 # "C" or "P"
+    quantity: int              # positive = long, negative = short
+    avg_price: float           # average entry price
+    current_price: float       # current market price
+    pnl: float                 # unrealized P&L in dollars
+
+
 class Broker(Protocol):
     """Minimal broker surface the order state machine relies on.
 
@@ -87,4 +100,8 @@ class Broker(Protocol):
 
     def replace_leg(self, leg_id: str, new_limit_price: float) -> LegFill:
         """Modify limit price on a working/partial leg (used by recovery)."""
+        ...
+
+    def query_positions(self) -> list[Position]:
+        """Query all open positions from the broker. Returns live position list."""
         ...

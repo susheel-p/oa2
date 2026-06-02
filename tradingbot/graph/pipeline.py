@@ -118,8 +118,13 @@ def run(
         clock = SystemClock()
     if calibrator is None:
         try:
-            calibrator = Calibrator.load(default_calibrator_path())
-        except Exception:
+            cal_path = default_calibrator_path()
+            calibrator = Calibrator.load(cal_path)
+        except Exception as e:
+            logger.log_warning(
+                f"Failed to load calibrator from {cal_path}: {e}",
+                "Falling back to identity mode"
+            )
             calibrator = Calibrator()
 
     # Warn if calibrator is uncalibrated or has low sample count

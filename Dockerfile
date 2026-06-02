@@ -25,6 +25,22 @@ RUN pip install --no-cache-dir -e ".[broker]"
 RUN mkdir -p /app/logs /app/reports
 
 # ---
+# Stage 1.5: pytest — runs pytest to validate the build
+# ---
+FROM base AS pytest
+
+# Install test dependencies
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e ".[broker,dev]"
+
+# Copy entire test suite
+COPY tests/ tests/
+COPY scratch/ scratch/
+
+# Run tests
+RUN pytest tests/ -v --tb=short
+
+# ---
 # Stage 2: dev — for local development with hot-reload
 # ---
 FROM base AS dev

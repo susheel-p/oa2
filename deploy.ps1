@@ -30,12 +30,16 @@
 .PARAMETER DryRun
     Pass --dry-run to both scan and report so nothing is written to positions.
 
+.PARAMETER SkipTests
+    Skip pytest validation before deploying (not recommended for production).
+
 .PARAMETER Tail
     Number of log lines to print in summary (default 50).
 #>
 param(
     [switch]$SkipBuild,
     [switch]$SkipReport,
+    [switch]$SkipTests,
     [switch]$RunScan,
     [string]$ScanTickers = "",
     [switch]$DryRun,
@@ -97,7 +101,44 @@ if (-not (Test-Path ".env")) {
 }
 Write-OK ".env present"
 
-# --- 1. Build ----------------------------------------------------------------
+# --- 0.5. Run tests (unless skipped) -----------------------------------------
+
+if (-not $SkipTests) {
+    Write-Step "Running pytest suite"
+
+    if (-not (Get-Command pytest -ErrorAction SilentlyContinue)) {
+        Write-Fail "pytest not found. Install with: pip install -e '.[dev]'"
+        exit 1
+    }
+
+    pytest tests/ -v --tb=short 2>&1 | Tee-Object -Variable testOutput | Out-Host
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "pytest failed with exit code $LASTEXITCODE"
+        Write-Host ""
+        Write-Host "Test output summary:" -ForegroundColor Yellow
+        $testOutput | Where-Object { $_ -match "(FAILED|ERROR|passed|failed|error)" } | ForEach-Object { Write-Host "  $_" }
+        exit 1
+    }
+    Write-OK "All tests passed"
+} else {
+    Write-Warn 'Skipping pytest validation (use --SkipTests only when necessary)'
+}
+
+# --- 1. Build Docker test stage (validates containerized env) --------
+
+if (-not $SkipTests -and -not $SkipBuild) {
+    Write-Step "Building Docker pytest stage to validate containerized environment"
+    docker build --target pytest -t "${CONTAINER}:test" . 2>&1 | Out-Host
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Docker pytest build failed - tests failed in container"
+        exit 1
+    }
+    Write-OK "Docker pytest stage passed - container environment is valid"
+}
+
+# --- 2. Build ----------------------------------------------------------------
 
 if (-not $SkipBuild) {
     Write-Step "Building Docker image (prod target)"
@@ -111,7 +152,7 @@ if (-not $SkipBuild) {
     Write-Warn 'Skipping build (--SkipBuild)'
 }
 
-# --- 2. Stop existing container ----------------------------------------------
+# --- 3. Stop existing container ----------------------------------------------
 
 Write-Step "Stopping existing container (if any)"
 $existing = docker ps -a --filter "name=^${CONTAINER}$" --format "{{.Names}}" 2>&1
@@ -126,7 +167,7 @@ if ($existing -match $CONTAINER) {
     Write-OK "No existing container to remove"
 }
 
-# --- 3. Start container ------------------------------------------------------
+# --- 4. Start container ------------------------------------------------------
 
 Write-Step "Starting container via docker-compose"
 try {
@@ -144,7 +185,7 @@ if ($running) {
     exit 1
 }
 
-# --- 4. Wait for health check ------------------------------------------------
+# --- 5. Wait for health check ------------------------------------------------
 
 Write-Step "Waiting for health check to pass (up to 120s)"
 $deadline = (Get-Date).AddSeconds(120)
@@ -170,7 +211,7 @@ if ($healthy) {
     Write-Warn "Health check did not pass within timeout (status: $status) - continuing anyway"
 }
 
-# --- 5. Validate logs --------------------------------------------------------
+# --- 6. Validate logs --------------------------------------------------------
 
 Write-Step "Validating logs for errors"
 Start-Sleep -Seconds 5  # give supervisord a moment to flush
@@ -217,7 +258,7 @@ if (Test-Path $hb) {
     Write-Warn "Heartbeat file not found yet (daemon may still be initializing)"
 }
 
-# --- 6. Connection check (moomoo OpenD) -------------------------------------
+# --- 7. Connection check (moomoo OpenD) -------------------------------------
 
 Write-Step "Checking moomoo OpenD connection (port 11111)"
 $tcpTest = Test-NetConnection -ComputerName localhost -Port 11111 -InformationLevel Quiet -WarningAction SilentlyContinue
@@ -227,7 +268,7 @@ if ($tcpTest) {
     Write-Warn "moomoo OpenD NOT reachable on localhost:11111 - broker features will degrade gracefully"
 }
 
-# --- 7. On-demand full scan --------------------------------------------------
+# --- 8. On-demand full scan --------------------------------------------------
 
 if ($RunScan) {
     Write-Step "Running on-demand full scan inside container"
@@ -292,7 +333,7 @@ if (-not $SkipReport) {
     Write-Warn 'Skipping report generation (--SkipReport)'
 }
 
-# --- 10. Final tail of container logs ----------------------------------------
+# --- 11. Final tail of container logs ----------------------------------------
 
 Write-Step "Last $Tail lines of container logs"
 docker logs $CONTAINER --tail $Tail 2>&1 | ForEach-Object {
@@ -305,7 +346,7 @@ docker logs $CONTAINER --tail $Tail 2>&1 | ForEach-Object {
     }
 }
 
-# --- 11. Summary --------------------------------------------------------------
+# --- 12. Summary --------------------------------------------------------------
 
 Write-Step "Deployment Summary"
 $info = docker inspect $CONTAINER | ConvertFrom-Json

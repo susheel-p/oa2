@@ -71,6 +71,7 @@ _FRIDAY_SWEEP_HOUR = FRIDAY_SWEEP_HOUR  # default 14 — 2:00 PM ET
 
 
 class ExitReason(Enum):
+    EXPIRED = "expired"
     STOP_LOSS = "stop_loss"
     TRAILING_STOP = "trailing_stop"
     PROFIT_TARGET = "profit_target"
@@ -161,6 +162,11 @@ class ExitEngine:
         """
         context = context or {}
 
+        # Rule 0: Expired — options past their expiry date, remove from book immediately
+        decision = self._check_expired(position)
+        if decision.fired:
+            return decision
+
         # Rule 1: Stop loss (highest priority — prevents blowup)
         decision = self._check_stop_loss(position)
         if decision.fired:
@@ -233,6 +239,23 @@ class ExitEngine:
     # ------------------------------------------------------------------
     # Individual rules
     # ------------------------------------------------------------------
+
+    def _check_expired(self, pos: OpenPosition) -> ExitDecision:
+        """Rule 0: Position options have passed expiry (DTE <= 0). Remove from book."""
+        if pos.current_dte <= 0:
+            return ExitDecision(
+                trade_id=pos.trade_id,
+                should_exit=True,
+                reason=ExitReason.EXPIRED,
+                urgency=ExitUrgency.IMMEDIATE,
+                detail=(
+                    f"Options expired: DTE {pos.current_dte} — "
+                    f"removing {pos.structure} from book (P&L {pos.current_pnl:+.2f})."
+                ),
+                current_pnl=pos.current_pnl,
+                current_dte=pos.current_dte,
+            )
+        return self._no_exit(pos)
 
     def _check_stop_loss(self, pos: OpenPosition) -> ExitDecision:
         """Rule 1: Close when cumulative loss >= stop_loss_pct × max_loss.

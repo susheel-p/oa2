@@ -173,6 +173,79 @@ def _broker():
     return _BROKER
 
 
+def _load_live_positions() -> tuple[dict[str, dict], int]:
+    """Query broker for live open positions and convert to tracking format.
+
+    Returns: (position_dict, count) where position_dict maps ticker -> position data
+    Only returns positions that are currently profitable or at risk (for monitoring).
+    Returns empty dict if broker query fails.
+    """
+    from tradingbot.execution.monitor import OpenPosition, Leg
+    import uuid
+    import time
+
+    try:
+        broker = _broker()
+        broker_positions = broker.query_positions()
+        if not broker_positions:
+            _log("No open positions found on broker.")
+            return {}, 0
+
+        positions_dict = {}
+        for bp in broker_positions:
+            try:
+                # Create a stable trade_id based on the position details
+                pos_key = f"{bp.underlying}_{bp.expiry}_{bp.strike}_{bp.right}"
+                trade_id = f"broker-{hash(pos_key) & 0x7fffffff:08x}"
+
+                # Build leg from broker position
+                leg = Leg(
+                    underlying=bp.underlying,
+                    expiry=bp.expiry,
+                    strike=bp.strike,
+                    right=bp.right,
+                    side=1 if bp.quantity > 0 else -1,
+                    contracts=abs(bp.quantity),
+                )
+
+                # Create OpenPosition tracking object
+                op = OpenPosition(
+                    trade_id=trade_id,
+                    ticker=bp.underlying,
+                    underlying=bp.underlying,
+                    structure="synthetic",  # Reconstructed from broker, not our structure pick
+                    direction="LONG" if bp.quantity > 0 else "SHORT",
+                    entry_price=bp.avg_price,
+                    entry_premium=bp.avg_price,
+                    entry_time=time.time(),
+                    entry_regime=0,  # Unknown
+                    entry_dte=0,     # Will be updated in mark_to_market
+                    contracts=abs(bp.quantity),
+                    max_profit_per_contract=0.0,
+                    max_loss_per_contract=0.0,
+                    delta=0.0,
+                    vega=0.0,
+                    theta=0.0,
+                    current_pnl=bp.pnl,
+                    current_underlying_price=bp.current_price,
+                    current_dte=0,
+                    peak_pnl=max(0.0, bp.pnl),
+                    legs=[leg],
+                )
+                positions_dict[bp.underlying] = op
+                _log(f"  Loaded from broker: {bp.underlying} {bp.right} {bp.strike} exp {bp.expiry} qty {bp.quantity} P&L ${bp.pnl:+.2f}")
+
+            except Exception as e:
+                _log(f"  Warning: failed to load position: {e}")
+                continue
+
+        return positions_dict, len(positions_dict)
+
+    except Exception as e:
+        _log(f"Warning: failed to query broker positions: {e}")
+        return {}, 0
+
+
 def _submit_to_broker(ticker: str, decision: dict, structure_pick: dict) -> list[dict]:
     """Build LegSpecs from a sized_approved decision + structure pick and submit.
 
@@ -359,14 +432,20 @@ def _run_entry_only(account_size: float, tickers: list[str], dry_run: bool) -> N
     today = _today_str()
     positions_path = LOG_DIR / f"positions_{today}.json"
 
-    # Carry-over logic: load from SAME DAY only, never carry over from previous days
-    # (previous day's positions are stale — start fresh each new day)
-    if not positions_path.exists():
-        _log("No positions file for today. Starting fresh.")
-        monitor = PositionMonitor()
-        monitor.save(positions_path)
+    # Load positions from broker (source of truth)
+    _log("Querying broker for live positions...")
+    broker_positions, count = _load_live_positions()
+    monitor = PositionMonitor()
+
+    if broker_positions:
+        _log(f"Loaded {count} position(s) from broker")
+        for ticker, pos in broker_positions.items():
+            monitor.add(pos)
     else:
-        monitor = PositionMonitor.load(positions_path)
+        _log("No open positions on broker")
+
+    # Save to today's file for reference/debugging
+    monitor.save(positions_path)
 
     # Filter tickers: skip those with open positions (entry guards)
     eligible_tickers = [t for t in tickers if not monitor.has_position_for(t)]
@@ -425,7 +504,7 @@ def _run_entry_only(account_size: float, tickers: list[str], dry_run: bool) -> N
 
 
 def _run_exit_only(account_size: float, dry_run: bool) -> None:
-    """Load today's positions, fetch fresh quotes, run exit engine, log alerts."""
+    """Load today's positions from broker, fetch fresh quotes, run exit engine, log alerts."""
     import yfinance as yf
 
     from tradingbot.execution.exit import ExitEngine
@@ -434,13 +513,20 @@ def _run_exit_only(account_size: float, dry_run: bool) -> None:
     today = _today_str()
     positions_path = LOG_DIR / f"positions_{today}.json"
 
-    # Load today's positions only (never carry over from previous days)
-    if not positions_path.exists():
-        _log("No open positions file for today.")
+    # Load positions from broker (source of truth)
+    _log("Querying broker for live positions...")
+    broker_positions, count = _load_live_positions()
+
+    if not broker_positions:
+        _log("No open positions on broker.")
         return
 
-    monitor = PositionMonitor.load(positions_path)
+    monitor = PositionMonitor()
+    for ticker, pos in broker_positions.items():
+        monitor.add(pos)
+
     positions = monitor.all_positions()
+    monitor.save(positions_path)  # Save for reference/debugging
 
     if not positions:
         _log("No open positions to monitor.")
@@ -787,12 +873,16 @@ def main() -> None:
     # Shared book and monitor across all tickers
     book = GreeksBook(account_size=account_size)
 
-    # Load open positions from today only (never carry over from previous days)
+    # Load open positions from broker (source of truth)
     positions_path = LOG_DIR / f"positions_{today}.json"
-    if positions_path.exists():
-        monitor = PositionMonitor.load(positions_path)
-        _log(f"Loaded {len(monitor.all_positions())} open position(s) from today")
-        for pos in monitor.all_positions():
+    _log("Querying broker for live positions...")
+    broker_positions, count = _load_live_positions()
+
+    monitor = PositionMonitor()
+    if broker_positions:
+        _log(f"Loaded {count} position(s) from broker")
+        for ticker, pos in broker_positions.items():
+            monitor.add(pos)
             book.add_position(
                 trade_id=pos.trade_id,
                 underlying=pos.ticker,
@@ -802,8 +892,10 @@ def main() -> None:
                 contracts=pos.contracts,
             )
     else:
-        _log("No open positions file for today. Starting fresh.")
-        monitor = PositionMonitor()
+        _log("No open positions on broker")
+
+    # Save to today's file for reference/debugging
+    monitor.save(positions_path)
 
     # ── Scan all tickers ──────────────────────────────────────────────────────
     results: list[dict] = []
