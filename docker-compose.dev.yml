@@ -14,7 +14,8 @@ services:
       - C:\Users\pamed\Susheel\tradingbot-docker\logs:/app/logs
       - C:\Users\pamed\Susheel\tradingbot-docker\reports:/app/reports
       - C:\Users\pamed\Susheel\tradingbot-docker\data\tradingbot:/data/tradingbot
-    # Use market_monitor directly instead of supervisord (easier to debug)
-    command: python scripts/market_monitor.py
+    # Development: use supervisord like production (ensures consistency)
+    # For live debugging, use: docker exec tradingbot-daemon tail -f /app/logs/daemon.log
+    # or: docker logs -f tradingbot-daemon
     # Less strict restart policy for development
     restart: on-failure

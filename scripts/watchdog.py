@@ -47,8 +47,12 @@ from scripts.market_summary import get_market_summary
 from tradingbot.core.market_hours import is_market_day
 
 
-TRADINGBOT_HOME = Path(os.getenv("TRADINGBOT_HOME", Path(__file__).parent.parent))
-HEARTBEAT_FILE = TRADINGBOT_HOME / "logs" / "daemon_heartbeat.txt"
+# Container heartbeat location (mounted from host)
+# Containerized daemon writes to /app/logs/daemon_heartbeat.txt which mounts to host tradingbot-docker/logs/
+HEARTBEAT_FILE = Path("C:/Users/pamed/Susheel/tradingbot-docker/logs/daemon_heartbeat.txt")
+
+# Watchdog state/log in project logs directory (for native monitoring)
+TRADINGBOT_HOME = Path(os.getenv("TRADINGBOT_HOME") or Path(__file__).parent.parent)
 WATCHDOG_HEARTBEAT_FILE = TRADINGBOT_HOME / "logs" / "watchdog_heartbeat.txt"
 STATE_FILE = TRADINGBOT_HOME / "logs" / "watchdog_state.json"
 LOG_FILE = TRADINGBOT_HOME / "logs" / "watchdog.log"
@@ -330,8 +334,8 @@ def check_daemon() -> bool:
         msg = (
             "🚨 ALERT: Daemon not started yet\n"
             f"Heartbeat file missing: {HEARTBEAT_FILE}\n\n"
-            f"Action: Start the daemon now\n"
-            f"python scripts/market_monitor.py"
+            f"Action: Start the container\n"
+            f"docker-compose up -d tradingbot-daemon"
         )
     else:
         msg = (
@@ -339,9 +343,9 @@ def check_daemon() -> bool:
             f"Expected update every 60s during market hours\n"
             f"Stale threshold: {STALE_SECONDS}s\n\n"
             f"Immediate Actions:\n"
-            f"1. Check logs: tail -f logs/daemon.log\n"
-            f"2. Restart: python scripts/market_monitor.py\n"
-            f"3. Verify: no duplicate daemon instances running"
+            f"1. Check logs: docker logs tradingbot-daemon\n"
+            f"2. Restart: docker-compose restart tradingbot-daemon\n"
+            f"3. Verify: docker ps | grep tradingbot-daemon"
         )
 
     # Send alert — only increment counter if send succeeds
