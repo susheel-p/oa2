@@ -356,9 +356,18 @@ class MoomooBroker:
                     if row.get("position_side") == "Short":
                         quantity = -quantity
 
-                    avg_price = float(row.get("cost_price", 0) or 0.0)
-                    current_price = float(row.get("market_price", 0) or 0.0)
-                    pnl = float(row.get("unrealized_pl", 0) or 0.0)
+                    # Handle N/A and None values from moomoo
+                    def _safe_float(val, default=0.0):
+                        if val is None or val == "" or str(val).strip().upper() == "N/A":
+                            return default
+                        try:
+                            return float(val)
+                        except (ValueError, TypeError):
+                            return default
+
+                    avg_price = _safe_float(row.get("cost_price"), 0.0)
+                    current_price = _safe_float(row.get("market_price"), 0.0)
+                    pnl = _safe_float(row.get("unrealized_pl"), 0.0)
 
                     pos = Position(
                         underlying=underlying,
